@@ -1,0 +1,36 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "default",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {}
+    },
+    {
+      "name": "Mingw_Debug",
+      "inherits": "default",
+      "toolchainFile": "${sourceDir}/toolchains/Mingw.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ARM_Debug",
+      "inherits": "default",
+      "toolchainFile": "${sourceDir}/toolchains/gcc-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ARM_Release",
+      "inherits": "default",
+      "toolchainFile": "${sourceDir}/toolchains/gcc-arm-none-eabi.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ]
+}
