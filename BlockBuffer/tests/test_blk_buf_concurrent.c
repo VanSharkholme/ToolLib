@@ -10,7 +10,7 @@
 #include <sched.h>
 #endif
 
-#include "blk_buf.h"
+#include "ring_blk_buf.h"
 
 enum { PRODUCERS = 3, CONSUMERS = 3, ITEMS_PER_PRODUCER = 1000,
        TOTAL = PRODUCERS * ITEMS_PER_PRODUCER, CAPACITY = 256, BLOCK_COUNT = 32 };

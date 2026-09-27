@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "blk_buf.h"
+#include "ring_blk_buf.h"
 #include "test_runner.h"
 
 enum { CAPACITY = 64, BLOCK_COUNT = 8, GUARD_SIZE = 8 };
