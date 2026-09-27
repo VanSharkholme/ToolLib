@@ -182,7 +182,7 @@ done:
     return result;
 }
 
-BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block)
+BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block, size_t actual_size)
 {
     if (rbb == NULL || block == NULL)
     {
@@ -193,8 +193,16 @@ BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block)
     uintptr_t state = RingBlockBuffer_Enter(rbb);
     if (RingBlockBuffer_IsPoolBlock(rbb, block) && block->status == BLOCK_ALLOCATED)
     {
-        block->status = BLOCK_WRITTEN;
-        result = BUFFER_OK;
+        if (actual_size == 0 || actual_size > block->size)
+        {
+            result = BUFFER_INVALID_ARGS;
+        }
+        else
+        {
+            block->size = actual_size;
+            block->status = BLOCK_WRITTEN;
+            result = BUFFER_OK;
+        }
     }
     RingBlockBuffer_Exit(rbb, state);
     return result;

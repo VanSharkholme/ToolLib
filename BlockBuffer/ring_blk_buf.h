@@ -62,8 +62,9 @@ BufferStatus RingBlockBuffer_Init(
     const RingBlockBufferSync* sync
 );
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block);
-/* Publishes the caller-filled payload and ends the producer's ownership. */
-BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block);
+/* Commits 1..reserved-size bytes, publishes the payload, and ends producer ownership.
+ * Before this call block->size is the reservation; afterward it is the readable length. */
+BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block, size_t actual_size);
 BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block);
 BufferStatus RingBlockBuffer_FreeBlock(RingBlockBuffer* rbb, Block* block);
 

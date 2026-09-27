@@ -11,9 +11,13 @@ Pass `NULL` instead of `&sync` only when one execution context uses the instance
 
 ## Ownership and ordering
 
-1. `AllocateBlock` returns an exclusive reservation. Its caller writes `block->data` outside the critical section.
-2. `WriteBlock(rbb, block)` publishes that payload. After it succeeds, the producer must stop accessing the block and its payload.
-3. `ReadBlock` returns one published block to one consumer. The consumer reads it outside the critical section and then calls `FreeBlock`.
+1. `AllocateBlock(rbb, capacity, &block)` returns an exclusive reservation. Before publication, `block->size` is that reserved capacity; its caller writes up to that many bytes to `block->data` outside the critical section.
+2. `WriteBlock(rbb, block, actual_size)` publishes `actual_size` bytes. The length must be between 1 and the reserved capacity, inclusive. On success, `block->size` becomes the readable length. After success, the producer must stop accessing the block and its payload.
+3. `ReadBlock` returns one published block to one consumer. The consumer reads `block->size` bytes outside the critical section and then calls `FreeBlock`.
+
+`WriteBlock` rejects a zero or over-capacity length with `BUFFER_INVALID_ARGS`; a foreign block or a block outside `BLOCK_ALLOCATED` returns `BUFFER_ERROR`. Failure leaves the reservation unchanged, so the producer can retry or cancel it with `FreeBlock`. The size and status change together under the configured critical section. Shrinking the current tail reservation makes its unused suffix available to the next allocation immediately. Shrinking an earlier reservation does not make an internal gap immediately reusable; that suffix can become available once later reservations are freed and the shrunk block becomes the tail.
+
+The caller must treat `Block` metadata (`data`, `size`, `status`, and `list_node`) as library-owned. Only write payload bytes while holding the reservation. Because `Block` is public and the original capacity is not stored separately, the library cannot detect a caller that changes `block->size` directly before publication.
 
 `ReadBlock` scans allocation order and skips blocks that are still being filled or were already read. A later published block can therefore be read before an earlier reservation. `FreeBlock` also accepts an allocated or written block as a cancellation, but the caller must have exclusive ownership and ensure no producer or consumer is using it. A successful free invalidates every old pointer to that reservation, even if the descriptor address is later reused. The API cannot detect a stale pointer after descriptor reuse.
 

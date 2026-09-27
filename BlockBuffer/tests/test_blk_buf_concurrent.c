@@ -65,12 +65,13 @@ static void* produce(void* arg)
     for (unsigned n = 0; n < ITEMS_PER_PRODUCER && !atomic_load(&stress->failed); ++n)
     {
         unsigned ticket = atomic_fetch_add(&stress->next_ticket, 1);
-        size_t size = 8u + (ticket * 11u % 24u);
+        size_t capacity = 8u + (ticket * 11u % 24u);
+        size_t actual_size = sizeof ticket + (ticket * 7u % (capacity - sizeof ticket + 1u));
         Block* block = NULL;
         BufferStatus status;
         do
         {
-            status = RingBlockBuffer_AllocateBlock(&stress->rbb, size, &block);
+            status = RingBlockBuffer_AllocateBlock(&stress->rbb, capacity, &block);
             if (status == BUFFER_FULL)
             {
                 yield_cpu();
@@ -86,11 +87,11 @@ static void* produce(void* arg)
             return NULL;
         }
         memcpy(block->data, &ticket, sizeof ticket);
-        for (size_t i = sizeof ticket; i < size; ++i)
+        for (size_t i = sizeof ticket; i < actual_size; ++i)
         {
             block->data[i] = pattern(ticket, i);
         }
-        if (RingBlockBuffer_WriteBlock(&stress->rbb, block) != BUFFER_OK)
+        if (RingBlockBuffer_WriteBlock(&stress->rbb, block, actual_size) != BUFFER_OK)
         {
             atomic_store(&stress->failed, true);
             return NULL;
@@ -118,7 +119,9 @@ static void* consume(void* arg)
         }
         unsigned ticket;
         memcpy(&ticket, block->data, sizeof ticket);
-        if (ticket >= TOTAL || block->size != 8u + (ticket * 11u % 24u))
+        size_t capacity = 8u + (ticket * 11u % 24u);
+        size_t actual_size = sizeof ticket + (ticket * 7u % (capacity - sizeof ticket + 1u));
+        if (ticket >= TOTAL || block->size != actual_size)
         {
             atomic_store(&stress->failed, true);
             return NULL;
