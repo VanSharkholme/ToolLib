@@ -2,11 +2,11 @@
 // Created by VanSharkholme on 2026/9/4.
 //
 
-#ifndef BLK_BUF_H
-#define BLK_BUF_H
+#ifndef TOOLLIB_BLK_BUF_H
+#define TOOLLIB_BLK_BUF_H
 
 #include <stdint.h>
-#include "../LinkedList/linked_list.h"
+#include "linked_list.h"
 
 typedef enum
 {
@@ -25,6 +25,17 @@ typedef enum
     BLOCK_READ,
 } BlockStatus;
 
+/* Callbacks must acquire/release mutual exclusion and payload visibility. */
+typedef uintptr_t (*RingBlockBufferCriticalEnter)(void* context);
+typedef void (*RingBlockBufferCriticalExit)(void* context, uintptr_t state);
+
+typedef struct
+{
+    RingBlockBufferCriticalEnter enter;
+    RingBlockBufferCriticalExit exit;
+    void* context;
+} RingBlockBufferSync;
+
 typedef struct
 {
     uint8_t* data;
@@ -33,7 +44,7 @@ typedef struct
     SLinkedListNode list_node;
 } Block;
 
-typedef struct
+typedef struct RingBlockBuffer
 {
     uint8_t* buffer;
     Block* block_pool;
@@ -42,16 +53,19 @@ typedef struct
     SLinkedListNode free_list;
     SLinkedListNode used_list;
     SLinkedListNode* tail;
+    RingBlockBufferSync sync;
 } RingBlockBuffer;
 
-
+/* NULL sync selects externally serialized / single-context operation. */
 BufferStatus RingBlockBuffer_Init(
-    RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num
+    RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
+    const RingBlockBufferSync* sync
 );
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block);
-BufferStatus RingBlockBuffer_WriteBlock(Block* block);
+/* Publishes the caller-filled payload and ends the producer's ownership. */
+BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block);
 BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block);
 BufferStatus RingBlockBuffer_FreeBlock(RingBlockBuffer* rbb, Block* block);
 
 
-#endif //BLK_BUF_H
+#endif //TOOLLIB_BLK_BUF_H

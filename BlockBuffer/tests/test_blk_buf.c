@@ -12,13 +12,46 @@ static struct
 static RingBlockBuffer rbb;
 static Block pool[BLOCK_COUNT];
 
+typedef struct
+{
+    unsigned enters;
+    unsigned exits;
+    uintptr_t state;
+    bool held;
+} SyncProbe;
+
+static uintptr_t probe_enter(void* context)
+{
+    SyncProbe* probe = context;
+    TEST_ASSERT_FALSE(probe->held);
+    probe->held = true;
+    probe->state = (uintptr_t)(0x1234u + ++probe->enters);
+    return probe->state;
+}
+
+static void probe_exit(void* context, uintptr_t state)
+{
+    SyncProbe* probe = context;
+    TEST_ASSERT_TRUE(probe->held);
+    TEST_ASSERT_TRUE(probe->state == state);
+    probe->held = false;
+    ++probe->exits;
+}
+
+static void assert_probe_balanced(const SyncProbe* probe, unsigned expected)
+{
+    TEST_ASSERT_EQUAL_UINT(expected, probe->enters);
+    TEST_ASSERT_EQUAL_UINT(expected, probe->exits);
+    TEST_ASSERT_FALSE(probe->held);
+}
+
 void setUp(void)
 {
     memset(&storage, 0xa5, sizeof storage);
     memset(&rbb, 0, sizeof rbb);
     memset(pool, 0, sizeof pool);
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
-        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT));
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, NULL));
 }
 
 void tearDown(void)
@@ -128,7 +161,7 @@ static void assert_allocate_full_preserves_state(size_t size)
     memcpy(old_data, storage.data, sizeof old_data);
     Block *block = NULL;
     TEST_ASSERT_EQUAL_INT(BUFFER_FULL, RingBlockBuffer_AllocateBlock(&rbb, size, &block));
-    /* Output pointer on error is intentionally unspecified. */
+    TEST_ASSERT_NULL(block);
     TEST_ASSERT_EQUAL_MEMORY(&old_rbb, &rbb, sizeof rbb);
     TEST_ASSERT_EQUAL_MEMORY(old_pool, pool, sizeof pool);
     TEST_ASSERT_EQUAL_MEMORY(old_data, storage.data, sizeof old_data);
@@ -140,37 +173,97 @@ static void test_init_sets_fields_and_all_descriptors_free(void)
     TEST_ASSERT_EQUAL_PTR(pool, rbb.block_pool);
     TEST_ASSERT_EQUAL_size_t(CAPACITY, rbb.buffer_size);
     TEST_ASSERT_EQUAL_size_t(BLOCK_COUNT, rbb.max_block_num);
+    TEST_ASSERT_NULL(rbb.sync.enter);
+    TEST_ASSERT_NULL(rbb.sync.exit);
+    TEST_ASSERT_NULL(rbb.sync.context);
     assert_integrity(0);
 }
 
 static void test_init_rejects_null_arguments_and_zero_pool(void)
 {
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(NULL, storage.data, CAPACITY, pool, BLOCK_COUNT));
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, NULL, CAPACITY, pool, BLOCK_COUNT));
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, NULL, BLOCK_COUNT));
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 0));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(NULL, storage.data, CAPACITY, pool, BLOCK_COUNT, NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, NULL, CAPACITY, pool, BLOCK_COUNT, NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, NULL, BLOCK_COUNT, NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 0, NULL));
     assert_integrity(0);
 }
 
 static void test_init_rejects_zero_capacity(void)
 {
     /* Proposed boundary contract: a zero-byte buffer is invalid. */
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, 0, pool, BLOCK_COUNT));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_Init(&rbb, storage.data, 0, pool, BLOCK_COUNT, NULL));
 }
 
 static void test_reinit_resets_used_descriptors(void)
 {
     allocate(8);
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, NULL));
     assert_integrity(0);
+}
+
+static void test_init_rejects_partial_sync_without_mutating_instance(void)
+{
+    RingBlockBuffer old_rbb = rbb;
+    Block old_pool[BLOCK_COUNT];
+    memcpy(old_pool, pool, sizeof pool);
+    RingBlockBufferSync sync = {probe_enter, NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
+    sync.enter = NULL;
+    sync.exit = probe_exit;
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
+    TEST_ASSERT_EQUAL_MEMORY(&old_rbb, &rbb, sizeof rbb);
+    TEST_ASSERT_EQUAL_MEMORY(old_pool, pool, sizeof pool);
+    assert_integrity(0);
+}
+
+static void test_init_copies_sync_configuration(void)
+{
+    SyncProbe probe = {0};
+    RingBlockBufferSync sync = {probe_enter, probe_exit, &probe};
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
+    sync.enter = NULL;
+    sync.exit = NULL;
+    sync.context = NULL;
+    Block* block = allocate(4);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
+    assert_probe_balanced(&probe, 2);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, NULL));
+    TEST_ASSERT_NULL(rbb.sync.enter);
+    TEST_ASSERT_NULL(rbb.sync.exit);
+    TEST_ASSERT_NULL(rbb.sync.context);
+    assert_integrity(0);
+}
+
+static void test_init_null_sync_overwrites_uninitialized_instance(void)
+{
+    RingBlockBuffer uninitialized;
+    Block descriptors[1];
+    uint8_t data[8];
+    memset(&uninitialized, 0xa5, sizeof uninitialized);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&uninitialized, data, sizeof data, descriptors, 1, NULL));
+    TEST_ASSERT_NULL(uninitialized.sync.enter);
+    TEST_ASSERT_NULL(uninitialized.sync.exit);
+    TEST_ASSERT_NULL(uninitialized.sync.context);
+    Block* block = NULL;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_AllocateBlock(&uninitialized, 8, &block));
+    TEST_ASSERT_EQUAL_PTR(&descriptors[0], block);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&uninitialized, block));
 }
 
 static void test_allocate_rejects_invalid_arguments(void)
 {
-    Block *block = NULL;
+    Block *block = &pool[0];
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_AllocateBlock(NULL, 8, &block));
+    TEST_ASSERT_NULL(block);
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_AllocateBlock(&rbb, 8, NULL));
+    block = &pool[0];
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_AllocateBlock(&rbb, 0, &block));
+    TEST_ASSERT_NULL(block);
     assert_integrity(0);
 }
 
@@ -228,7 +321,7 @@ static void test_allocate_when_payload_full(void)
 
 static void test_allocate_when_descriptor_pool_full(void)
 {
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 1));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 1, NULL));
     allocate(1);
     assert_allocate_full_preserves_state(1);
     assert_integrity(1);
@@ -296,14 +389,15 @@ static void test_allocate_wrapped_gap_too_small(void)
 
 static void test_write_rejects_null(void)
 {
-    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_WriteBlock(NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_WriteBlock(NULL, &pool[0]));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_WriteBlock(&rbb, NULL));
 }
 
 static void test_write_marks_block_without_changing_payload(void)
 {
     Block *block = allocate(8);
     memset(block->data, 0x3c, block->size);
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
     TEST_ASSERT_EQUAL_INT(BLOCK_WRITTEN, block->status);
     TEST_ASSERT_EQUAL_PTR(storage.data, block->data);
     TEST_ASSERT_EQUAL_size_t(8, block->size);
@@ -311,18 +405,56 @@ static void test_write_marks_block_without_changing_payload(void)
     assert_integrity(1);
 }
 
+static void test_write_rejects_non_allocated_states(void)
+{
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, &pool[0]));
+    Block* block = allocate(8);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, block));
+    Block* read = NULL;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &read));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, block));
+    assert_integrity(0);
+}
+
+static void test_foreign_block_cannot_be_written_or_freed(void)
+{
+    uint8_t other_data[CAPACITY];
+    Block other_pool[2];
+    RingBlockBuffer other;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&other, other_data, sizeof other_data, other_pool, 2, NULL));
+    Block* block = allocate(8);
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&other, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&other, block));
+    TEST_ASSERT_EQUAL_INT(BLOCK_ALLOCATED, block->status);
+    TEST_ASSERT_NULL(other.used_list.next);
+    TEST_ASSERT_EQUAL_PTR(&other.used_list, other.tail);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
+    assert_integrity(0);
+}
+
 static void test_read_rejects_invalid_arguments(void)
 {
-    Block *block = NULL;
+    Block *block = &pool[0];
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_ReadBlock(NULL, &block));
+    TEST_ASSERT_NULL(block);
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_ReadBlock(&rbb, NULL));
+    Block* written = allocate(4);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, written));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_ReadBlock(&rbb, NULL));
+    TEST_ASSERT_EQUAL_INT(BLOCK_WRITTEN, written->status);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, written));
     assert_integrity(0);
 }
 
 static void test_read_empty_buffer(void)
 {
-    Block *block = NULL;
+    Block *block = &pool[0];
     TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, RingBlockBuffer_ReadBlock(&rbb, &block));
+    TEST_ASSERT_NULL(block);
     assert_integrity(0);
 }
 
@@ -331,7 +463,7 @@ static void test_read_returns_written_payload(void)
     const uint8_t payload[] = {0, 1, 0x7f, 0x80, 0xff};
     Block *written = allocate(sizeof payload);
     memcpy(written->data, payload, sizeof payload);
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(written));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, written));
     Block *read = NULL;
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &read));
     TEST_ASSERT_EQUAL_PTR(written, read);
@@ -379,7 +511,7 @@ static void test_read_with_only_unwritten_block_returns_empty(void)
 static void test_read_does_not_return_same_block_twice(void)
 {
     Block *block = allocate(8);
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
     Block *read = NULL;
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &read));
     TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, RingBlockBuffer_ReadBlock(&rbb, &read));
@@ -444,15 +576,123 @@ static void test_double_free_preserves_lists(void)
     assert_integrity(2);
 }
 
+static void test_write_and_free_reject_pool_boundary_and_unlisted_blocks(void)
+{
+    Block fake = {0};
+    fake.status = BLOCK_ALLOCATED;
+    fake.data = storage.data;
+    fake.size = 1;
+    Block* before_pool = (Block*)((uintptr_t)pool - 1u);
+    Block* interior = (Block*)((uintptr_t)pool + 1u);
+    Block* one_past = &pool[BLOCK_COUNT];
+    RingBlockBuffer previous = rbb;
+    Block previous_pool[BLOCK_COUNT];
+    memcpy(previous_pool, pool, sizeof pool);
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, &fake));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, &fake));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, before_pool));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, before_pool));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, interior));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, interior));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, one_past));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, one_past));
+    TEST_ASSERT_EQUAL_MEMORY(&previous, &rbb, sizeof rbb);
+    TEST_ASSERT_EQUAL_MEMORY(previous_pool, pool, sizeof pool);
+    TEST_ASSERT_EQUAL_INT(BLOCK_ALLOCATED, fake.status);
+    assert_integrity(0);
+}
+
+static void test_free_rejects_unlisted_block_inside_pool(void)
+{
+    pool[0].status = BLOCK_ALLOCATED;
+    RingBlockBuffer previous = rbb;
+    Block previous_pool[BLOCK_COUNT];
+    memcpy(previous_pool, pool, sizeof pool);
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, &pool[0]));
+    TEST_ASSERT_EQUAL_MEMORY(&previous, &rbb, sizeof rbb);
+    TEST_ASSERT_EQUAL_MEMORY(previous_pool, pool, sizeof pool);
+    pool[0].status = BLOCK_FREE;
+    assert_integrity(0);
+}
+
+static void test_write_and_free_reject_block_beyond_configured_pool_count(void)
+{
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 1, NULL));
+    pool[1].status = BLOCK_ALLOCATED;
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, &pool[1]));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, &pool[1]));
+    TEST_ASSERT_EQUAL_INT(BLOCK_ALLOCATED, pool[1].status);
+    Block* block = allocate(8);
+    TEST_ASSERT_EQUAL_PTR(&pool[0], block);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
+    assert_integrity(0);
+}
+
+static void test_free_accepts_all_active_states(void)
+{
+    Block* allocated = allocate(8);
+    Block* written = allocate(8);
+    Block* read = allocate(8);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, read));
+    Block* got = NULL;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &got));
+    TEST_ASSERT_EQUAL_PTR(read, got);
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, written));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, allocated));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, written));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, read));
+    assert_integrity(0);
+}
+
+static void test_sync_callbacks_are_balanced_on_success_and_failure(void)
+{
+    SyncProbe first = {0};
+    SyncProbe second = {0};
+    RingBlockBufferSync first_sync = {probe_enter, probe_exit, &first};
+    RingBlockBufferSync second_sync = {probe_enter, probe_exit, &second};
+    uint8_t other_data[8];
+    Block other_pool[1];
+    RingBlockBuffer other;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &first_sync));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK,
+        RingBlockBuffer_Init(&other, other_data, sizeof other_data, other_pool, 1, &second_sync));
+    Block* block = NULL;
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_AllocateBlock(&rbb, 0, &block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_WriteBlock(&rbb, NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_ReadBlock(&rbb, NULL));
+    TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_FreeBlock(&rbb, NULL));
+    assert_probe_balanced(&first, 0);
+    TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, RingBlockBuffer_ReadBlock(&rbb, &block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_FULL, RingBlockBuffer_AllocateBlock(&rbb, CAPACITY + 1, &block));
+    block = allocate(4);
+    Block* allocated = block;
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&other, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&other, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, RingBlockBuffer_ReadBlock(&rbb, &block));
+    TEST_ASSERT_NULL(block);
+    block = allocated;
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_WriteBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
+    TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, block));
+    assert_probe_balanced(&first, 9);
+    assert_probe_balanced(&second, 2);
+    assert_integrity(0);
+}
+
 static void test_full_lifecycle_reuses_single_descriptor(void)
 {
-    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 1));
+    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, 1, NULL));
     for (unsigned i = 0; i < 16; ++i)
     {
         Block *block = allocate(CAPACITY);
         TEST_ASSERT_EQUAL_PTR(storage.data, block->data);
         memset(block->data, (int)i, block->size);
-        TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(block));
+        TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
         Block *read = NULL;
         TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &read));
         TEST_ASSERT_EQUAL_PTR(block, read);
@@ -510,7 +750,7 @@ static void test_public_api_repeated_mixed_size_fifo_cycles(void)
                     ++wrap_count;
                 previous_address = block->data;
                 memset(block->data, pattern, block->size);
-                TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(block));
+                TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, block));
                 pending[pending_count++] = (struct Pending){block, requested_size, pattern};
                 ++successful_allocations;
             }
@@ -558,6 +798,119 @@ static void test_public_api_repeated_mixed_size_fifo_cycles(void)
     assert_integrity(0);
 }
 
+static uint32_t next_random(uint32_t* state)
+{
+    *state = *state * UINT32_C(1664525) + UINT32_C(1013904223);
+    return *state;
+}
+
+static void test_randomized_out_of_order_lifecycle(void)
+{
+    BlockStatus expected[BLOCK_COUNT];
+    uint8_t patterns[BLOCK_COUNT] = {0};
+    uint32_t random = UINT32_C(0x71a5c39d);
+    unsigned allocations = 0;
+    unsigned writes = 0;
+    unsigned reads = 0;
+    unsigned cancellations = 0;
+    for (size_t i = 0; i < BLOCK_COUNT; ++i)
+        expected[i] = BLOCK_FREE;
+
+    for (unsigned step = 0; step < 4096; ++step)
+    {
+        uint32_t draw = next_random(&random);
+        unsigned action = (draw >> 16) % 4u;
+        if (action == 0)
+        {
+            Block* block = NULL;
+            size_t size = draw % 23u + 1u;
+            BufferStatus status = RingBlockBuffer_AllocateBlock(&rbb, size, &block);
+            if (status == BUFFER_OK)
+            {
+                size_t index = (size_t)(block - pool);
+                TEST_ASSERT_TRUE(index < BLOCK_COUNT);
+                TEST_ASSERT_EQUAL_INT(BLOCK_FREE, expected[index]);
+                expected[index] = BLOCK_ALLOCATED;
+                patterns[index] = (uint8_t)(step + 1u);
+                memset(block->data, patterns[index], block->size);
+                ++allocations;
+            }
+            else
+            {
+                TEST_ASSERT_EQUAL_INT(BUFFER_FULL, status);
+                TEST_ASSERT_NULL(block);
+            }
+        }
+        else if (action == 1)
+        {
+            for (size_t offset = 0; offset < BLOCK_COUNT; ++offset)
+            {
+                size_t index = (offset + draw / 4u) % BLOCK_COUNT;
+                if (expected[index] == BLOCK_ALLOCATED)
+                {
+                    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_WriteBlock(&rbb, &pool[index]));
+                    expected[index] = BLOCK_WRITTEN;
+                    ++writes;
+                    break;
+                }
+            }
+        }
+        else if (action == 2)
+        {
+            Block* block = NULL;
+            BufferStatus status = RingBlockBuffer_ReadBlock(&rbb, &block);
+            if (status == BUFFER_OK)
+            {
+                size_t index = (size_t)(block - pool);
+                TEST_ASSERT_TRUE(index < BLOCK_COUNT);
+                TEST_ASSERT_EQUAL_INT(BLOCK_WRITTEN, expected[index]);
+                TEST_ASSERT_EACH_EQUAL_UINT8(patterns[index], block->data, block->size);
+                expected[index] = BLOCK_READ;
+                ++reads;
+            }
+            else
+            {
+                TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, status);
+                TEST_ASSERT_NULL(block);
+                for (size_t i = 0; i < BLOCK_COUNT; ++i)
+                    TEST_ASSERT_NOT_EQUAL(BLOCK_WRITTEN, expected[i]);
+            }
+        }
+        else
+        {
+            for (size_t offset = 0; offset < BLOCK_COUNT; ++offset)
+            {
+                size_t index = (offset + draw / 4u) % BLOCK_COUNT;
+                if (expected[index] != BLOCK_FREE)
+                {
+                    if (expected[index] != BLOCK_READ)
+                        ++cancellations;
+                    TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, &pool[index]));
+                    expected[index] = BLOCK_FREE;
+                    break;
+                }
+            }
+        }
+
+        size_t live = 0;
+        for (size_t i = 0; i < BLOCK_COUNT; ++i)
+        {
+            TEST_ASSERT_EQUAL_INT(expected[i], pool[i].status);
+            if (expected[i] != BLOCK_FREE)
+            {
+                ++live;
+                TEST_ASSERT_EACH_EQUAL_UINT8(patterns[i], pool[i].data, pool[i].size);
+            }
+        }
+        assert_integrity(live);
+    }
+
+    TEST_ASSERT_GREATER_THAN_UINT(100, allocations);
+    TEST_ASSERT_GREATER_THAN_UINT(50, writes);
+    TEST_ASSERT_GREATER_THAN_UINT(20, reads);
+    TEST_ASSERT_GREATER_THAN_UINT(20, cancellations);
+}
+
 int main(int argc, char **argv)
 {
     const TestCase cases[] = {
@@ -565,6 +918,9 @@ int main(int argc, char **argv)
         TEST_CASE(test_init_rejects_null_arguments_and_zero_pool),
         TEST_CASE(test_init_rejects_zero_capacity),
         TEST_CASE(test_reinit_resets_used_descriptors),
+        TEST_CASE(test_init_rejects_partial_sync_without_mutating_instance),
+        TEST_CASE(test_init_copies_sync_configuration),
+        TEST_CASE(test_init_null_sync_overwrites_uninitialized_instance),
         TEST_CASE(test_allocate_rejects_invalid_arguments),
         TEST_CASE(test_allocate_first_block_starts_at_buffer),
         TEST_CASE(test_allocate_exact_capacity),
@@ -584,6 +940,8 @@ int main(int argc, char **argv)
         TEST_CASE(test_allocate_wrapped_gap_too_small),
         TEST_CASE(test_write_rejects_null),
         TEST_CASE(test_write_marks_block_without_changing_payload),
+        TEST_CASE(test_write_rejects_non_allocated_states),
+        TEST_CASE(test_foreign_block_cannot_be_written_or_freed),
         TEST_CASE(test_read_rejects_invalid_arguments),
         TEST_CASE(test_read_empty_buffer),
         TEST_CASE(test_read_returns_written_payload),
@@ -598,9 +956,15 @@ int main(int argc, char **argv)
         TEST_CASE(test_free_tail_updates_tail_pointer),
         TEST_CASE(test_free_middle_preserves_neighbors),
         TEST_CASE(test_double_free_preserves_lists),
+        TEST_CASE(test_write_and_free_reject_pool_boundary_and_unlisted_blocks),
+        TEST_CASE(test_free_rejects_unlisted_block_inside_pool),
+        TEST_CASE(test_write_and_free_reject_block_beyond_configured_pool_count),
+        TEST_CASE(test_free_accepts_all_active_states),
+        TEST_CASE(test_sync_callbacks_are_balanced_on_success_and_failure),
         TEST_CASE(test_full_lifecycle_reuses_single_descriptor),
         TEST_CASE(test_public_api_wraparound_preserves_live_payloads),
         TEST_CASE(test_public_api_repeated_mixed_size_fifo_cycles),
+        TEST_CASE(test_randomized_out_of_order_lifecycle),
     };
     return run_test_cases(argc, argv, __FILE__, cases, sizeof cases / sizeof cases[0]);
 }

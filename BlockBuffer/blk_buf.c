@@ -1,5 +1,37 @@
 #include "blk_buf.h"
 
+static uintptr_t RingBlockBuffer_Enter(RingBlockBuffer* rbb)
+{
+    return rbb->sync.enter != NULL ? rbb->sync.enter(rbb->sync.context) : 0;
+}
+
+static void RingBlockBuffer_Exit(RingBlockBuffer* rbb, uintptr_t state)
+{
+    if (rbb->sync.exit != NULL)
+    {
+        rbb->sync.exit(rbb->sync.context, state);
+    }
+}
+
+static bool RingBlockBuffer_IsPoolBlock(const RingBlockBuffer* rbb, const Block* block)
+{
+    uintptr_t first = (uintptr_t)rbb->block_pool;
+    uintptr_t address = (uintptr_t)block;
+    if (address < first)
+    {
+        return false;
+    }
+
+    uintptr_t offset = address - first;
+    if (offset % sizeof(Block) != 0)
+    {
+        return false;
+    }
+
+    size_t index = (size_t)(offset / sizeof(Block));
+    return index < rbb->max_block_num && block == &rbb->block_pool[index];
+}
+
 static void RingBlockBuffer_UsedListAppend(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
@@ -10,14 +42,14 @@ static void RingBlockBuffer_UsedListAppend(RingBlockBuffer* rbb, Block* block)
     rbb->tail = &block->list_node;
 }
 
-static void RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
+static bool RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
     {
-        return;
+        return false;
     }
-    SLinkedListNode *prev = &rbb->used_list;
-    SLinkedListNode *target = &block->list_node;
+    SLinkedListNode* prev = &rbb->used_list;
+    SLinkedListNode* target = &block->list_node;
     while (prev != NULL && prev->next != target)
     {
         prev = prev->next;
@@ -29,14 +61,21 @@ static void RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
         {
             rbb->tail = prev;
         }
+        return true;
     }
+    return false;
 }
 
 BufferStatus RingBlockBuffer_Init(
-    RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num
+    RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
+    const RingBlockBufferSync* sync
 )
 {
     if (rbb == NULL || buffer == NULL || block_pool == NULL || buffer_size == 0 || max_block_num == 0)
+    {
+        return BUFFER_INVALID_ARGS;
+    }
+    if (sync != NULL && (sync->enter == NULL) != (sync->exit == NULL))
     {
         return BUFFER_INVALID_ARGS;
     }
@@ -45,6 +84,7 @@ BufferStatus RingBlockBuffer_Init(
     rbb->buffer_size = buffer_size;
     rbb->block_pool = block_pool;
     rbb->max_block_num = max_block_num;
+    rbb->sync = sync != NULL ? *sync : (RingBlockBufferSync){0};
 
     SLinkedList_Init(&rbb->free_list);
     SLinkedList_Init(&rbb->used_list);
@@ -63,27 +103,30 @@ BufferStatus RingBlockBuffer_Init(
 
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block)
 {
+    if (allocated_block != NULL)
+    {
+        *allocated_block = NULL;
+    }
     if (rbb == NULL || allocated_block == NULL || block_size == 0)
     {
         return BUFFER_INVALID_ARGS;
     }
 
+    BufferStatus result = BUFFER_FULL;
+    uint8_t* data = NULL;
+    uintptr_t state = RingBlockBuffer_Enter(rbb);
     if (SLinkedList_IsEmpty(&rbb->free_list))
     {
-        return BUFFER_FULL;
+        goto done;
     }
 
     if (SLinkedList_IsEmpty(&rbb->used_list))
     {
         if (block_size > rbb->buffer_size)
         {
-            return BUFFER_FULL;
+            goto done;
         }
-        *allocated_block = SLinkedList_Entry(SLinkedList_Pop(&rbb->free_list), Block, list_node);
-        (*allocated_block)->data = rbb->buffer;
-        (*allocated_block)->size = block_size;
-        (*allocated_block)->status = BLOCK_ALLOCATED;
-        RingBlockBuffer_UsedListAppend(rbb, *allocated_block);
+        data = rbb->buffer;
     }
     else
     {
@@ -101,23 +144,11 @@ BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_si
         {
             if ((size_t)(rbb->buffer + rbb->buffer_size - (tail->data + tail->size)) >= block_size)
             {
-                *allocated_block = SLinkedList_Entry(SLinkedList_Pop(&rbb->free_list), Block, list_node);
-                (*allocated_block)->data = tail->data + tail->size;
-                (*allocated_block)->size = block_size;
-                (*allocated_block)->status = BLOCK_ALLOCATED;
-                RingBlockBuffer_UsedListAppend(rbb, *allocated_block);
+                data = tail->data + tail->size;
             }
             else if ((size_t)(head->data - rbb->buffer) >= block_size)
             {
-                *allocated_block = SLinkedList_Entry(SLinkedList_Pop(&rbb->free_list), Block, list_node);
-                (*allocated_block)->data = rbb->buffer;
-                (*allocated_block)->size = block_size;
-                (*allocated_block)->status = BLOCK_ALLOCATED;
-                RingBlockBuffer_UsedListAppend(rbb, *allocated_block);
-            }
-            else
-            {
-                return BUFFER_FULL;
+                data = rbb->buffer;
             }
         }
         /* Situation 2:
@@ -131,41 +162,60 @@ BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_si
         {
             if ((size_t)(head->data - (tail->data + tail->size)) >= block_size)
             {
-                *allocated_block = SLinkedList_Entry(SLinkedList_Pop(&rbb->free_list), Block, list_node);
-                (*allocated_block)->data = tail->data + tail->size;
-                (*allocated_block)->size = block_size;
-                (*allocated_block)->status = BLOCK_ALLOCATED;
-                RingBlockBuffer_UsedListAppend(rbb, *allocated_block);
-            }
-            else
-            {
-                return BUFFER_FULL;
+                data = tail->data + tail->size;
             }
         }
     }
-    return BUFFER_OK;
-}
-
-BufferStatus RingBlockBuffer_WriteBlock(Block* block)
-{
-    if (block == NULL)
+    if (data != NULL)
     {
-        return BUFFER_INVALID_ARGS;
+        Block* block = SLinkedList_Entry(SLinkedList_Pop(&rbb->free_list), Block, list_node);
+        block->data = data;
+        block->size = block_size;
+        block->status = BLOCK_ALLOCATED;
+        RingBlockBuffer_UsedListAppend(rbb, block);
+        *allocated_block = block;
+        result = BUFFER_OK;
     }
-    block->status = BLOCK_WRITTEN;
-    return BUFFER_OK;
+
+done:
+    RingBlockBuffer_Exit(rbb, state);
+    return result;
 }
 
-BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block)
+BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
     {
         return BUFFER_INVALID_ARGS;
     }
 
+    BufferStatus result = BUFFER_ERROR;
+    uintptr_t state = RingBlockBuffer_Enter(rbb);
+    if (RingBlockBuffer_IsPoolBlock(rbb, block) && block->status == BLOCK_ALLOCATED)
+    {
+        block->status = BLOCK_WRITTEN;
+        result = BUFFER_OK;
+    }
+    RingBlockBuffer_Exit(rbb, state);
+    return result;
+}
+
+BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block)
+{
+    if (block != NULL)
+    {
+        *block = NULL;
+    }
+    if (rbb == NULL || block == NULL)
+    {
+        return BUFFER_INVALID_ARGS;
+    }
+
+    BufferStatus result = BUFFER_EMPTY;
+    uintptr_t state = RingBlockBuffer_Enter(rbb);
     if (SLinkedList_IsEmpty(&rbb->used_list))
     {
-        return BUFFER_EMPTY;
+        goto done;
     }
 
     SLinkedListNode* current = rbb->used_list.next;
@@ -175,19 +225,16 @@ BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block)
         if (b->status == BLOCK_WRITTEN)
         {
             *block = b;
+            b->status = BLOCK_READ;
+            result = BUFFER_OK;
             break;
         }
         current = current->next;
     }
 
-    if (current == NULL)
-    {
-        return BUFFER_EMPTY;
-    }
-
-    (*block)->status = BLOCK_READ;
-
-    return BUFFER_OK;
+done:
+    RingBlockBuffer_Exit(rbb, state);
+    return result;
 }
 
 BufferStatus RingBlockBuffer_FreeBlock(RingBlockBuffer* rbb, Block* block)
@@ -197,16 +244,24 @@ BufferStatus RingBlockBuffer_FreeBlock(RingBlockBuffer* rbb, Block* block)
         return BUFFER_INVALID_ARGS;
     }
 
-    if (block->status == BLOCK_FREE)
+    BufferStatus result = BUFFER_ERROR;
+    uintptr_t state = RingBlockBuffer_Enter(rbb);
+    if (!RingBlockBuffer_IsPoolBlock(rbb, block) || block->status == BLOCK_FREE)
     {
-        return BUFFER_ERROR;
+        goto done;
     }
 
-    RingBlockBuffer_UsedListRemove(rbb, block);
+    if (!RingBlockBuffer_UsedListRemove(rbb, block))
+    {
+        goto done;
+    }
     block->status = BLOCK_FREE;
     block->data = NULL;
     block->size = 0;
     SLinkedList_InsertAt(&rbb->free_list, &block->list_node);
+    result = BUFFER_OK;
 
-    return BUFFER_OK;
+done:
+    RingBlockBuffer_Exit(rbb, state);
+    return result;
 }

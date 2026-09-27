@@ -1,5 +1,5 @@
-set(CMAKE_SYSTEM_NAME               Windows)
-set(CMAKE_SYSTEM_PROCESSOR          x86_64)
+#set(CMAKE_SYSTEM_NAME               Windows)
+#set(CMAKE_SYSTEM_PROCESSOR          x86_64)
 
 set(CMAKE_C_COMPILER_ID GNU)
 set(CMAKE_CXX_COMPILER_ID GNU)

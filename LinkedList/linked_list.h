@@ -2,8 +2,8 @@
 // Created by VanSharkholme on 2026/9/6.
 //
 
-#ifndef LINKED_LIST_H
-#define LINKED_LIST_H
+#ifndef TOOLLIB_LINKED_LIST_H
+#define TOOLLIB_LINKED_LIST_H
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -95,4 +95,4 @@ static inline SLinkedListNode* SLinkedList_Pop(SLinkedList list)
     return node;
 }
 
-#endif //LINKED_LIST_H
+#endif //TOOLLIB_LINKED_LIST_H
