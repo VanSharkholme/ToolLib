@@ -12,6 +12,8 @@ if(BUILD_TESTING)
     add_subdirectory(TestCommon)
 endif()
 
+add_subdirectory(Lock)
 add_subdirectory(BlockBuffer)
 add_subdirectory(LinkedList)
+add_subdirectory(Console)
 
