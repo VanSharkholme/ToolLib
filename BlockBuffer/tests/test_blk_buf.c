@@ -14,34 +14,34 @@ static Block pool[BLOCK_COUNT];
 
 typedef struct
 {
-    unsigned enters;
-    unsigned exits;
+    unsigned acquires;
+    unsigned releases;
     uintptr_t state;
     bool held;
-} SyncProbe;
+} LockProbe;
 
-static uintptr_t probe_enter(void* context)
+static uintptr_t probe_acquire(Lock* lock)
 {
-    SyncProbe* probe = context;
+    LockProbe* probe = lock->context;
     TEST_ASSERT_FALSE(probe->held);
     probe->held = true;
-    probe->state = (uintptr_t)(0x1234u + ++probe->enters);
+    probe->state = (uintptr_t)(0x1234u + ++probe->acquires);
     return probe->state;
 }
 
-static void probe_exit(void* context, uintptr_t state)
+static void probe_release(Lock* lock, uintptr_t state)
 {
-    SyncProbe* probe = context;
+    LockProbe* probe = lock->context;
     TEST_ASSERT_TRUE(probe->held);
     TEST_ASSERT_TRUE(probe->state == state);
     probe->held = false;
-    ++probe->exits;
+    ++probe->releases;
 }
 
-static void assert_probe_balanced(const SyncProbe* probe, unsigned expected)
+static void assert_lock_probe_balanced(const LockProbe* probe, unsigned expected)
 {
-    TEST_ASSERT_EQUAL_UINT(expected, probe->enters);
-    TEST_ASSERT_EQUAL_UINT(expected, probe->exits);
+    TEST_ASSERT_EQUAL_UINT(expected, probe->acquires);
+    TEST_ASSERT_EQUAL_UINT(expected, probe->releases);
     TEST_ASSERT_FALSE(probe->held);
 }
 
@@ -173,9 +173,9 @@ static void test_init_sets_fields_and_all_descriptors_free(void)
     TEST_ASSERT_EQUAL_PTR(pool, rbb.block_pool);
     TEST_ASSERT_EQUAL_size_t(CAPACITY, rbb.buffer_size);
     TEST_ASSERT_EQUAL_size_t(BLOCK_COUNT, rbb.max_block_num);
-    TEST_ASSERT_NULL(rbb.sync.enter);
-    TEST_ASSERT_NULL(rbb.sync.exit);
-    TEST_ASSERT_NULL(rbb.sync.context);
+    TEST_ASSERT_NULL(rbb.lock.acquire);
+    TEST_ASSERT_NULL(rbb.lock.release);
+    TEST_ASSERT_NULL(rbb.lock.context);
     assert_integrity(0);
 }
 
@@ -201,44 +201,44 @@ static void test_reinit_resets_used_descriptors(void)
     assert_integrity(0);
 }
 
-static void test_init_rejects_partial_sync_without_mutating_instance(void)
+static void test_init_rejects_partial_lock_without_mutating_instance(void)
 {
     RingBlockBuffer old_rbb = rbb;
     Block old_pool[BLOCK_COUNT];
     memcpy(old_pool, pool, sizeof pool);
-    RingBlockBufferSync sync = {probe_enter, NULL, NULL};
+    Lock lock = {Lock_Custom, probe_acquire, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS,
-        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
-    sync.enter = NULL;
-    sync.exit = probe_exit;
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &lock));
+    lock.acquire = NULL;
+    lock.release = probe_release;
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS,
-        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &lock));
     TEST_ASSERT_EQUAL_MEMORY(&old_rbb, &rbb, sizeof rbb);
     TEST_ASSERT_EQUAL_MEMORY(old_pool, pool, sizeof pool);
     assert_integrity(0);
 }
 
-static void test_init_copies_sync_configuration(void)
+static void test_init_copies_lock_configuration(void)
 {
-    SyncProbe probe = {0};
-    RingBlockBufferSync sync = {probe_enter, probe_exit, &probe};
+    LockProbe probe = {0};
+    Lock lock = {Lock_Custom, probe_acquire, probe_release, &probe};
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
-        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &sync));
-    sync.enter = NULL;
-    sync.exit = NULL;
-    sync.context = NULL;
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &lock));
+    lock.acquire = NULL;
+    lock.release = NULL;
+    lock.context = NULL;
     Block* block = allocate(4);
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
-    assert_probe_balanced(&probe, 2);
+    assert_lock_probe_balanced(&probe, 2);
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
         RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, NULL));
-    TEST_ASSERT_NULL(rbb.sync.enter);
-    TEST_ASSERT_NULL(rbb.sync.exit);
-    TEST_ASSERT_NULL(rbb.sync.context);
+    TEST_ASSERT_NULL(rbb.lock.acquire);
+    TEST_ASSERT_NULL(rbb.lock.release);
+    TEST_ASSERT_NULL(rbb.lock.context);
     assert_integrity(0);
 }
 
-static void test_init_null_sync_overwrites_uninitialized_instance(void)
+static void test_init_null_lock_overwrites_uninitialized_instance(void)
 {
     RingBlockBuffer uninitialized;
     Block descriptors[1];
@@ -246,9 +246,9 @@ static void test_init_null_sync_overwrites_uninitialized_instance(void)
     memset(&uninitialized, 0xa5, sizeof uninitialized);
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
         RingBlockBuffer_Init(&uninitialized, data, sizeof data, descriptors, 1, NULL));
-    TEST_ASSERT_NULL(uninitialized.sync.enter);
-    TEST_ASSERT_NULL(uninitialized.sync.exit);
-    TEST_ASSERT_NULL(uninitialized.sync.context);
+    TEST_ASSERT_NULL(uninitialized.lock.acquire);
+    TEST_ASSERT_NULL(uninitialized.lock.release);
+    TEST_ASSERT_NULL(uninitialized.lock.context);
     Block* block = NULL;
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_AllocateBlock(&uninitialized, 8, &block));
     TEST_ASSERT_EQUAL_PTR(&descriptors[0], block);
@@ -713,25 +713,25 @@ static void test_free_accepts_all_active_states(void)
     assert_integrity(0);
 }
 
-static void test_sync_callbacks_are_balanced_on_success_and_failure(void)
+static void test_lock_callbacks_are_balanced_on_success_and_failure(void)
 {
-    SyncProbe first = {0};
-    SyncProbe second = {0};
-    RingBlockBufferSync first_sync = {probe_enter, probe_exit, &first};
-    RingBlockBufferSync second_sync = {probe_enter, probe_exit, &second};
+    LockProbe first = {0};
+    LockProbe second = {0};
+    Lock first_lock = {Lock_Custom, probe_acquire, probe_release, &first};
+    Lock second_lock = {Lock_Custom, probe_acquire, probe_release, &second};
     uint8_t other_data[8];
     Block other_pool[1];
     RingBlockBuffer other;
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
-        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &first_sync));
+        RingBlockBuffer_Init(&rbb, storage.data, CAPACITY, pool, BLOCK_COUNT, &first_lock));
     TEST_ASSERT_EQUAL_INT(BUFFER_OK,
-        RingBlockBuffer_Init(&other, other_data, sizeof other_data, other_pool, 1, &second_sync));
+        RingBlockBuffer_Init(&other, other_data, sizeof other_data, other_pool, 1, &second_lock));
     Block* block = NULL;
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_AllocateBlock(&rbb, 0, &block));
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_WriteBlock(&rbb, NULL, 1));
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_ReadBlock(&rbb, NULL));
     TEST_ASSERT_EQUAL_INT(BUFFER_INVALID_ARGS, RingBlockBuffer_FreeBlock(&rbb, NULL));
-    assert_probe_balanced(&first, 0);
+    assert_lock_probe_balanced(&first, 0);
     TEST_ASSERT_EQUAL_INT(BUFFER_EMPTY, RingBlockBuffer_ReadBlock(&rbb, &block));
     TEST_ASSERT_EQUAL_INT(BUFFER_FULL, RingBlockBuffer_AllocateBlock(&rbb, CAPACITY + 1, &block));
     block = allocate(4);
@@ -749,8 +749,8 @@ static void test_sync_callbacks_are_balanced_on_success_and_failure(void)
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_ReadBlock(&rbb, &block));
     TEST_ASSERT_EQUAL_INT(BUFFER_OK, RingBlockBuffer_FreeBlock(&rbb, block));
     TEST_ASSERT_EQUAL_INT(BUFFER_ERROR, RingBlockBuffer_FreeBlock(&rbb, block));
-    assert_probe_balanced(&first, 10);
-    assert_probe_balanced(&second, 2);
+    assert_lock_probe_balanced(&first, 10);
+    assert_lock_probe_balanced(&second, 2);
     assert_integrity(0);
 }
 
@@ -995,9 +995,9 @@ int main(int argc, char **argv)
         TEST_CASE(test_init_rejects_null_arguments_and_zero_pool),
         TEST_CASE(test_init_rejects_zero_capacity),
         TEST_CASE(test_reinit_resets_used_descriptors),
-        TEST_CASE(test_init_rejects_partial_sync_without_mutating_instance),
-        TEST_CASE(test_init_copies_sync_configuration),
-        TEST_CASE(test_init_null_sync_overwrites_uninitialized_instance),
+        TEST_CASE(test_init_rejects_partial_lock_without_mutating_instance),
+        TEST_CASE(test_init_copies_lock_configuration),
+        TEST_CASE(test_init_null_lock_overwrites_uninitialized_instance),
         TEST_CASE(test_allocate_rejects_invalid_arguments),
         TEST_CASE(test_allocate_first_block_starts_at_buffer),
         TEST_CASE(test_allocate_exact_capacity),
@@ -1041,7 +1041,7 @@ int main(int argc, char **argv)
         TEST_CASE(test_free_rejects_unlisted_block_inside_pool),
         TEST_CASE(test_write_and_free_reject_block_beyond_configured_pool_count),
         TEST_CASE(test_free_accepts_all_active_states),
-        TEST_CASE(test_sync_callbacks_are_balanced_on_success_and_failure),
+        TEST_CASE(test_lock_callbacks_are_balanced_on_success_and_failure),
         TEST_CASE(test_full_lifecycle_reuses_single_descriptor),
         TEST_CASE(test_public_api_wraparound_preserves_live_payloads),
         TEST_CASE(test_public_api_repeated_mixed_size_fifo_cycles),

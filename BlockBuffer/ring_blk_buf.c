@@ -2,14 +2,14 @@
 
 static uintptr_t RingBlockBuffer_Enter(RingBlockBuffer* rbb)
 {
-    return rbb->sync.enter != NULL ? rbb->sync.enter(rbb->sync.context) : 0;
+    return rbb->lock.acquire != NULL ? rbb->lock.acquire(&rbb->lock) : 0;
 }
 
 static void RingBlockBuffer_Exit(RingBlockBuffer* rbb, uintptr_t state)
 {
-    if (rbb->sync.exit != NULL)
+    if (rbb->lock.release != NULL)
     {
-        rbb->sync.exit(rbb->sync.context, state);
+        rbb->lock.release(&rbb->lock, state);
     }
 }
 
@@ -68,14 +68,14 @@ static bool RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
 
 BufferStatus RingBlockBuffer_Init(
     RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
-    const RingBlockBufferSync* sync
+    const Lock* lock
 )
 {
     if (rbb == NULL || buffer == NULL || block_pool == NULL || buffer_size == 0 || max_block_num == 0)
     {
         return BUFFER_INVALID_ARGS;
     }
-    if (sync != NULL && (sync->enter == NULL) != (sync->exit == NULL))
+    if (lock != NULL && (lock->acquire == NULL) != (lock->release == NULL))
     {
         return BUFFER_INVALID_ARGS;
     }
@@ -84,7 +84,7 @@ BufferStatus RingBlockBuffer_Init(
     rbb->buffer_size = buffer_size;
     rbb->block_pool = block_pool;
     rbb->max_block_num = max_block_num;
-    rbb->sync = sync != NULL ? *sync : (RingBlockBufferSync){0};
+    rbb->lock = lock != NULL ? *lock : (Lock){0};
 
     SLinkedList_Init(&rbb->free_list);
     SLinkedList_Init(&rbb->used_list);

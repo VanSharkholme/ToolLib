@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include "linked_list.h"
+#include "lock.h"
 
 typedef enum
 {
@@ -25,16 +26,6 @@ typedef enum
     BLOCK_READ,
 } BlockStatus;
 
-/* Callbacks must acquire/release mutual exclusion and payload visibility. */
-typedef uintptr_t (*RingBlockBufferCriticalEnter)(void* context);
-typedef void (*RingBlockBufferCriticalExit)(void* context, uintptr_t state);
-
-typedef struct
-{
-    RingBlockBufferCriticalEnter enter;
-    RingBlockBufferCriticalExit exit;
-    void* context;
-} RingBlockBufferSync;
 
 typedef struct
 {
@@ -53,13 +44,13 @@ typedef struct RingBlockBuffer
     SLinkedListNode free_list;
     SLinkedListNode used_list;
     SLinkedListNode* tail;
-    RingBlockBufferSync sync;
+    Lock lock;
 } RingBlockBuffer;
 
-/* NULL sync selects externally serialized / single-context operation. */
+/* NULL lock selects externally serialized / single-context operation. */
 BufferStatus RingBlockBuffer_Init(
     RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
-    const RingBlockBufferSync* sync
+    const Lock* lock
 );
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block);
 /* Commits 1..reserved-size bytes, publishes the payload, and ends producer ownership.

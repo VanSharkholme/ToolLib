@@ -27,19 +27,19 @@ typedef struct
     atomic_uchar seen[TOTAL];
 } Stress;
 
-static uintptr_t mutex_enter(void* context)
+static uintptr_t mutex_acquire(Lock* lock)
 {
-    if (pthread_mutex_lock(context) != 0)
+    if (pthread_mutex_lock(lock->context) != 0)
     {
         abort();
     }
     return 0;
 }
 
-static void mutex_exit(void* context, uintptr_t state)
+static void mutex_release(Lock* lock, uintptr_t state)
 {
     (void)state;
-    if (pthread_mutex_unlock(context) != 0)
+    if (pthread_mutex_unlock(lock->context) != 0)
     {
         abort();
     }
@@ -159,9 +159,9 @@ int main(void)
     {
         atomic_init(&stress->seen[i], 0);
     }
-    RingBlockBufferSync sync = {mutex_enter, mutex_exit, &stress->mutex};
+    Lock lock = {Lock_Custom, mutex_acquire, mutex_release, &stress->mutex};
     if (RingBlockBuffer_Init(&stress->rbb, stress->storage, CAPACITY,
-                             stress->pool, BLOCK_COUNT, &sync) != BUFFER_OK)
+                             stress->pool, BLOCK_COUNT, &lock) != BUFFER_OK)
     {
         return 1;
     }
