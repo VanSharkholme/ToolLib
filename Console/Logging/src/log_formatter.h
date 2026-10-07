@@ -6,7 +6,9 @@
 #define TOOLLIB_LOG_FORMATTER_H
 
 #include <stddef.h>
+#include <stdarg.h>
 #include "log_types.h"
+#include "log_config.h"
 
 //
 // Control sequences, based on ANSI.
@@ -54,9 +56,46 @@
 #define LOG_COLOR_E LOG_CTRL_TEXT_BRIGHT_RED
 #define LOG_COLOR_W LOG_CTRL_TEXT_BRIGHT_YELLOW
 #define LOG_COLOR_I LOG_CTRL_TEXT_BRIGHT_GREEN
-#define LOG_COLOR_D
+#define LOG_COLOR_D LOG_CTRL_TEXT_WHITE
 
-#define LOG_STR_FORMAT(color, label, str) LOG_COLOR_ ## color "[" label "] " str LOG_CTRL_RESET
+
+#if defined(LOG_ENABLE_COLOR) && LOG_ENABLE_COLOR
+#define LOG_LEN_CALC_COLOR_HEAD_LEN 7
+#define LOG_LEN_CALC_COLOR_TAIL_LEN 4
+#else
+#define LOG_LEN_CALC_COLOR_HEAD_LEN 0
+#define LOG_LEN_CALC_COLOR_TAIL_LEN 0
+#endif
+#define LOG_LEN_CALC_COLOR_TOTAL_LEN (LOG_LEN_CALC_COLOR_HEAD_LEN + LOG_LEN_CALC_COLOR_TAIL_LEN)
+
+#if defined(LOG_ENABLE_FILE_LINE) && LOG_ENABLE_FILE_LINE
+#define LOG_LEN_CALC_MAX_FILENAME_LEN LOG_MAX_FILE_NAME_LENGTH
+#define LOG_LEN_CALC_MAX_LINE_NUM_LEN 10
+#define LOG_LEN_CALC_FILELINE_MISC_LEN 3 // '(' + ')' + ':'
+#else
+#define LOG_LEN_CALC_MAX_FILENAME_LEN 0
+#define LOG_LEN_CALC_MAX_LINE_NUM_LEN 0
+#define LOG_LEN_CALC_FILELINE_MISC_LEN 0
+#endif
+#define LOG_LEN_CALC_FILELINE_LEN (LOG_LEN_CALC_MAX_FILENAME_LEN + LOG_LEN_CALC_MAX_LINE_NUM_LEN + LOG_LEN_CALC_FILELINE_MISC_LEN)
+
+#if defined(LOG_AUTO_NEWLINE) && LOG_AUTO_NEWLINE
+#define LOG_LEN_CALC_NEW_LINE_LEN 1
+#else
+#define LOG_LEN_CALC_NEW_LINE_LEN 0
+#endif
+
+#define LOG_LEN_CALC_LEVEL_LEN 3 // [E/W/I/D]
+#define LOG_LEN_CALC_TAIL_LEN (LOG_LEN_CALC_COLOR_TAIL_LEN+LOG_LEN_CALC_NEW_LINE_LEN+1) // color_reset + '\n'+'\0'
+#define LOG_LEN_CALC_MISC_LEN 3 // '[' + ']' + ' '
+#define LOG_LEN_CALC_MIN_SINGLE_LOG_LEN \
+    (LOG_LEN_CALC_COLOR_HEAD_LEN + LOG_LEN_CALC_LEVEL_LEN + LOG_MAX_TAG_LENGTH +\
+    LOG_LEN_CALC_FILELINE_LEN + LOG_MIN_CONTENT_LENGTH +\
+    LOG_LEN_CALC_TAIL_LEN + LOG_LEN_CALC_MISC_LEN)
+
+#if LOG_LEN_CALC_MIN_SINGLE_LOG_LEN > LOG_MAX_SINGLE_LOG_LENGTH
+#error "Not enough space for logging, increase LOG_MAX_SINGLE_LOG_LENGTH or decrease LOG_MAX_CONTENT_LENGTH and LOG_MAX_TAG_LENGTH."
+#endif
 
 typedef enum
 {
@@ -70,4 +109,10 @@ typedef enum
     GRAY
 } LOG_TEXT_COLOR;
 
+size_t log_formatter_process(
+    char *buffer, size_t buffer_size,
+    Log_Level level, const char *tag,
+    const char *file, uint32_t line,
+    const char *format, va_list args
+);
 #endif //TOOLLIB_LOG_FORMATTER_H

@@ -7,7 +7,7 @@
 
 #include <stdint.h>
 #include <stdarg.h>
-#include "log_buffer.h"
+
 #include "log_backend.h"
 #include "log_types.h"
 #include "log_config.h"

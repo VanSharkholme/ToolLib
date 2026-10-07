@@ -28,6 +28,6 @@ BufferStatus log_buffer_deinit(void)
 BufferStatus log_buffer_allocate(Block **buffer)
 {
     *buffer = NULL;
-    BufferStatus status = RingBlockBuffer_AllocateBlock(&log_rbb, LOG_MAX_CHAR_PER_LOG, buffer);
+    BufferStatus status = RingBlockBuffer_AllocateBlock(&log_rbb, LOG_MAX_SINGLE_LOG_LENGTH, buffer);
     return status;
 }

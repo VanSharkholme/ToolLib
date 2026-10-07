@@ -5,7 +5,10 @@
 #include "log.h"
 #include <string.h>
 #include <stdarg.h>
+#include <stdio.h>
+
 #include "log_formatter.h"
+#include "log_buffer.h"
 
 typedef struct
 {
@@ -69,6 +72,10 @@ Log_Status log_deinit(void)
 
 void log_write(Log_Level level, const char *tag, const char *file, uint32_t line, const char *format, ...)
 {
+    if (!log_context.initialized)
+        return;
+    if (level == LOG_LEVEL_NONE || level > log_context.runtime_level)
+        return;
     va_list args;
 
     va_start(args, format);
@@ -90,10 +97,14 @@ void log_vwrite(Log_Level level, const char *tag, const char *file, uint32_t lin
     if (status != BUFFER_OK)
         return;
 
-    size_t written_chars = log_formatter_process(level, tag, file, line, format, args);
-
+    size_t written_chars = log_formatter_process((char *)block->data, block->size, level, tag, file, line, format, args);
+    printf("%s", (char *)block->data);
 }
 
+void log_backend_tx_complete(void *context)
+{
+    return;
+}
 
 
 
