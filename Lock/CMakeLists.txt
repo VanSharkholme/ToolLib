@@ -11,12 +11,17 @@ file(GLOB src
 target_sources(lock PRIVATE ${src})
 target_include_directories(lock
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}
 )
 target_include_directories(lock
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/IRQ
-        ${CMAKE_CURRENT_SOURCE_DIR}/Spinlock
+    ${CMAKE_CURRENT_SOURCE_DIR}/IRQ
+    ${CMAKE_CURRENT_SOURCE_DIR}/Spinlock
+)
+
+target_link_libraries(lock
+    PUBLIC
+    Base
 )
 
 if (BUILD_TESTING)

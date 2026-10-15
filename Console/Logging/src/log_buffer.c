@@ -31,3 +31,9 @@ BufferStatus log_buffer_allocate(Block **buffer)
     BufferStatus status = RingBlockBuffer_AllocateBlock(&log_rbb, LOG_MAX_SINGLE_LOG_LENGTH, buffer);
     return status;
 }
+
+BufferStatus log_buffer_write(Block *block, size_t size)
+{
+    BufferStatus status = RingBlockBuffer_WriteBlock(&log_rbb, block, size);
+    return status;
+}

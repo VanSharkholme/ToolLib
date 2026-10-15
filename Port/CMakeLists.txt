@@ -1,1 +1,24 @@
 cmake_minimum_required(VERSION 3.20)
+
+if(CMAKE_CROSSCOMPILING)
+    set(uart_port_default none)
+else()
+    set(uart_port_default host)
+endif()
+set(TOOLLIB_UART_PORT "${uart_port_default}" CACHE STRING "UART PAL port (host or none)")
+set_property(CACHE TOOLLIB_UART_PORT PROPERTY STRINGS host none)
+
+if(TOOLLIB_UART_PORT STREQUAL "host")
+    add_library(pal_uart_port STATIC host/UART/pal_uart_host.c)
+    target_include_directories(pal_uart_port PUBLIC host/UART/include)
+    target_include_directories(pal_uart_port PRIVATE
+        ${PROJECT_SOURCE_DIR}/PAL/UART/include
+        ${PROJECT_SOURCE_DIR}/PAL/UART/port)
+    if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
+        add_subdirectory(tests)
+    endif()
+elseif(NOT TOOLLIB_UART_PORT STREQUAL "none")
+    if (NOT TARGET pal_uart_port)
+        message(FATAL_ERROR "Unknown TOOLLIB_UART_PORT: ${TOOLLIB_UART_PORT}")
+    endif ()
+endif()

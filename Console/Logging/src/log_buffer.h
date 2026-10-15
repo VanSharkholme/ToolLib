@@ -11,5 +11,6 @@
 BufferStatus log_buffer_init(void);
 BufferStatus log_buffer_deinit(void);
 BufferStatus log_buffer_allocate(Block **buffer);
+BufferStatus log_buffer_write(Block *block, size_t size);
 
 #endif //TOOLLIB_LOG_BUFFER_H
