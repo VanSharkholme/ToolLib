@@ -11,9 +11,7 @@ set_property(CACHE TOOLLIB_UART_PORT PROPERTY STRINGS host none)
 if(TOOLLIB_UART_PORT STREQUAL "host")
     add_library(pal_uart_port STATIC host/UART/pal_uart_host.c)
     target_include_directories(pal_uart_port PUBLIC host/UART/include)
-    target_include_directories(pal_uart_port PRIVATE
-        ${PROJECT_SOURCE_DIR}/PAL/UART/include
-        ${PROJECT_SOURCE_DIR}/PAL/UART/port)
+    target_link_libraries(pal_uart_port PUBLIC pal_uart_contract)
     if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
         add_subdirectory(tests)
     endif()

@@ -1,0 +1,15 @@
+add_executable(test_pal_uart test_pal_uart.c)
+target_link_libraries(test_pal_uart PRIVATE pal_uart unity)
+target_include_directories(test_pal_uart PRIVATE ${PROJECT_SOURCE_DIR}/TestCommon)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test_pal_uart PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS test_pal_uart.c)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/test_pal_uart.c" cases
+     REGEX "^[ ]+TEST_CASE\\(test_[A-Za-z0-9_]+\\)")
+foreach(entry IN LISTS cases)
+    string(REGEX MATCH "test_[A-Za-z0-9_]+" case_name "${entry}")
+    add_test(NAME pal_uart.${case_name} COMMAND test_pal_uart ${case_name})
+    set_tests_properties(pal_uart.${case_name} PROPERTIES TIMEOUT 5 LABELS pal_uart)
+endforeach()
