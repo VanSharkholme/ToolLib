@@ -17,19 +17,29 @@ static const PalUartConfig config = {
 typedef struct {
     unsigned calls;
     PalUartDirection direction;
-    PalUartStatus status;
+    PalUartTransferResult result;
     size_t transferred;
+    PalUartErrors errors;
+    int rearm_rx;
 } CompletionRecord;
 
+static uint8_t rearmed_rx;
+
 static void completion(PalUartId id, PalUartDirection direction,
-                       PalUartStatus status, size_t transferred, void *context)
+                       PalUartTransferResult result, size_t transferred, PalUartErrors errors, void *context)
 {
     TEST_ASSERT_EQUAL_UINT(USART1, id);
     CompletionRecord *record = context;
     ++record->calls;
     record->direction = direction;
-    record->status = status;
+    record->result = result;
     record->transferred = transferred;
+    record->errors = errors;
+    if (record->rearm_rx && direction == PAL_UART_DIR_RX) {
+        record->rearm_rx = 0;
+        TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK,
+            PAL_UART_StartRx(id, PAL_UART_ASYNC_IRQ, &rearmed_rx, 1, completion, context));
+    }
 }
 
 void setUp(void)
@@ -111,7 +121,7 @@ static void test_async_mode_busy_completion_and_cancel(void)
     size_t transferred = 0;
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Init(USART1));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_INVALID_ARGUMENT,
-        PAL_UART_StartTx(USART1, (PalUartAsyncMode)2, tx, sizeof tx, completion, &record));
+        PAL_UART_StartTx(USART1, (PalUartAsyncMode)99, tx, sizeof tx, completion, &record));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_UNSUPPORTED,
         PAL_UART_StartRx(USART1, PAL_UART_ASYNC_DMA, rx, sizeof rx, completion, &record));
     TEST_ASSERT_EQUAL_UINT(0, record.calls);
@@ -131,15 +141,15 @@ static void test_async_mode_busy_completion_and_cancel(void)
         PAL_UART_StartRx(USART1, PAL_UART_ASYNC_IRQ, rx, sizeof rx, completion, &rx_record));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Host_FeedRx(USART1, incoming, sizeof incoming));
     TEST_ASSERT_EQUAL_UINT(1, rx_record.calls);
-    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, rx_record.status);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_OK, rx_record.result);
     TEST_ASSERT_EQUAL_INT(PAL_UART_DIR_RX, rx_record.direction);
     TEST_ASSERT_EQUAL_MEMORY(incoming, rx, sizeof rx);
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Cancel(USART1, PAL_UART_DIR_TX));
     TEST_ASSERT_EQUAL_UINT(1, record.calls);
-    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_CANCELLED, record.status);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_CANCELLED, record.result);
     TEST_ASSERT_EQUAL_size_t(0, record.transferred);
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_NOT_ACTIVE,
-                          PAL_UART_Host_CompleteTx(USART1, PAL_UART_STATUS_OK, 3));
+                          PAL_UART_Host_CompleteTx(USART1, PAL_UART_TRANSFER_OK, 3, PAL_UART_ERROR_NONE));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_NOT_ACTIVE, PAL_UART_Cancel(USART1, PAL_UART_DIR_TX));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_DeInit(USART1));
 }
@@ -154,9 +164,10 @@ static void test_async_tx_error_and_buffer_lifetime(void)
         PAL_UART_StartTx(USART1, PAL_UART_ASYNC_IRQ, tx, sizeof tx, completion, &record));
     tx[0] = 7;
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK,
-        PAL_UART_Host_CompleteTx(USART1, PAL_UART_STATUS_IO_ERROR, 2));
+        PAL_UART_Host_CompleteTx(USART1, PAL_UART_TRANSFER_ABORTED, 2, PAL_UART_ERROR_DMA));
     TEST_ASSERT_EQUAL_UINT(1, record.calls);
-    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_IO_ERROR, record.status);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_ABORTED, record.result);
+    TEST_ASSERT_EQUAL_UINT(PAL_UART_ERROR_DMA, record.errors);
     TEST_ASSERT_EQUAL_size_t(2, record.transferred);
     TEST_ASSERT_EQUAL_size_t(2, PAL_UART_Host_TakeTx(USART1, captured, sizeof captured));
     TEST_ASSERT_EQUAL_UINT8(7, captured[0]);
@@ -176,7 +187,7 @@ static void test_driver_start_rejection_does_not_complete(void)
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK,
         PAL_UART_StartTx(USART1, PAL_UART_ASYNC_IRQ, &tx, 1, completion, &record));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK,
-        PAL_UART_Host_CompleteTx(USART1, PAL_UART_STATUS_OK, 1));
+        PAL_UART_Host_CompleteTx(USART1, PAL_UART_TRANSFER_OK, 1, PAL_UART_ERROR_NONE));
     TEST_ASSERT_EQUAL_UINT(1, record.calls);
 }
 
@@ -289,11 +300,11 @@ static void test_detach_waits_for_transfers_and_blocks_access_after_release(void
 
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Cancel(USART1, PAL_UART_DIR_TX));
     TEST_ASSERT_EQUAL_UINT(1, tx_record.calls);
-    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_CANCELLED, tx_record.status);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_CANCELLED, tx_record.result);
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_BUSY, PAL_UART_Detach(USART1));
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Host_FeedRx(USART1, &tx, 1));
     TEST_ASSERT_EQUAL_UINT(1, rx_record.calls);
-    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, rx_record.status);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_OK, rx_record.result);
     TEST_ASSERT_EQUAL_UINT8(tx, rx);
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Detach(USART1));
 
@@ -388,7 +399,26 @@ static void test_opposite_direction_blocking_io_and_partial_counts(void)
     TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Write(USART1, &tx, 1, 0, &count));
 }
 
+static void test_inline_completion_can_rearm_request(void)
+{
+    uint8_t incoming = 42, received = 0;
+    CompletionRecord record = {.rearm_rx = 1};
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Init(USART1));
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Host_FeedRx(USART1, &incoming, 1));
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK,
+        PAL_UART_StartRx(USART1, PAL_UART_ASYNC_IRQ, &received, 1, completion, &record));
+    TEST_ASSERT_EQUAL_UINT(1, record.calls);
+    TEST_ASSERT_EQUAL_UINT8(42, received);
+    TEST_ASSERT_EQUAL_UINT(PAL_UART_ERROR_NONE, record.errors);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_BUSY, PAL_UART_DeInit(USART1));
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_Cancel(USART1, PAL_UART_DIR_RX));
+    TEST_ASSERT_EQUAL_UINT(2, record.calls);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_TRANSFER_CANCELLED, record.result);
+    TEST_ASSERT_EQUAL_INT(PAL_UART_STATUS_OK, PAL_UART_DeInit(USART1));
+}
+
 static const TestCase cases[] = {
+    TEST_CASE(test_inline_completion_can_rearm_request),
     TEST_CASE(test_modified_failure_recovery_and_owned_release),
     TEST_CASE(test_modified_failure_preserves_attached_ownership_and_hardware),
     TEST_CASE(test_opposite_direction_blocking_io_and_partial_counts),

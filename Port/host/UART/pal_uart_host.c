@@ -10,8 +10,6 @@ typedef struct {
     const uint8_t *tx_data;
     uint8_t *rx_data;
     size_t length;
-    PalUartCompletion completion;
-    void *context;
 } PendingTransfer;
 
 typedef struct {
@@ -61,11 +59,11 @@ static void PAL_UART_Host_ConsumeRx(HostUart *device, uint8_t *out, size_t lengt
 static void PAL_UART_Host_FinishRxIfReady(HostUart *device)
 {
     PendingTransfer pending = device->rx;
-    if (pending.completion == NULL || device->rx_size < pending.length) return;
+    if (pending.length == 0 || device->rx_size < pending.length) return;
     PAL_UART_Host_ConsumeRx(device, pending.rx_data, pending.length);
     memset(&device->rx, 0, sizeof device->rx);
-    pending.completion(device->id, PAL_UART_DIR_RX, PAL_UART_STATUS_OK,
-                       pending.length, pending.context);
+    PAL_UART_AsyncFinish(device->id, PAL_UART_DIR_RX, PAL_UART_TRANSFER_OK,
+                         pending.length, PAL_UART_ERROR_NONE);
 }
 
 void PAL_UART_Host_Reset(void)
@@ -108,7 +106,7 @@ PalUartStatus PAL_UART_Host_SetExternalReady(PalUartId id, int ready)
     HostUart *device;
     PalUartStatus status = PAL_UART_Host_Lookup(id, &device);
     if (status != PAL_UART_STATUS_OK) return status;
-    if (device->pal.state.binding != PAL_UART_UNBOUND || device->tx.completion || device->rx.completion)
+    if (device->pal.state.binding != PAL_UART_UNBOUND || device->tx.length || device->rx.length)
         return PAL_UART_STATUS_BUSY;
     if (ready && !device->hardware_ready)
         device->config = device->default_config;
@@ -140,7 +138,7 @@ PalUartStatus PAL_UART_Host_SetDmaBound(PalUartId id, PalUartDirection direction
     if (direction != PAL_UART_DIR_TX && direction != PAL_UART_DIR_RX)
         return PAL_UART_STATUS_INVALID_ARGUMENT;
     PendingTransfer *pending = direction == PAL_UART_DIR_TX ? &device->tx : &device->rx;
-    if (pending->completion != NULL) return PAL_UART_STATUS_BUSY;
+    if (pending->length != 0) return PAL_UART_STATUS_BUSY;
     int *binding = direction == PAL_UART_DIR_TX ? &device->tx_dma_bound : &device->rx_dma_bound;
     *binding = bound != 0;
     return PAL_UART_STATUS_OK;
@@ -181,8 +179,8 @@ PalUartDevice *PAL_UART_Port_Find(PalUartId id)
 PalUartStatus PAL_UART_Port_CheckIdle(void *port_context, PalUartDirection directions)
 {
     HostUart *device = port_context;
-    if (((directions & PAL_UART_DIR_TX) && device->tx.completion) ||
-        ((directions & PAL_UART_DIR_RX) && device->rx.completion))
+    if (((directions & PAL_UART_DIR_TX) && device->tx.length) ||
+        ((directions & PAL_UART_DIR_RX) && device->rx.length))
         return PAL_UART_STATUS_BUSY;
     return PAL_UART_STATUS_OK;
 }
@@ -260,13 +258,11 @@ PalUartStatus PAL_UART_Port_Read(void *port_context, uint8_t *data, size_t lengt
     return count == length ? PAL_UART_STATUS_OK : PAL_UART_STATUS_TIMEOUT;
 }
 
-PalUartStatus PAL_UART_Port_StartTx(PalUartId id, PalUartAsyncMode mode,
-                                     const uint8_t *data, size_t length,
-                                     PalUartCompletion completion, void *context)
+PalUartStatus PAL_UART_Port_StartTx(void *port_context, PalUartAsyncMode mode,
+                                     const uint8_t *data, size_t length)
 {
-    HostUart *device;
-    PalUartStatus status = PAL_UART_Host_Lookup(id, &device);
-    if (status != PAL_UART_STATUS_OK) return status;
+    HostUart *device = port_context;
+    PalUartStatus status;
     if (mode == PAL_UART_ASYNC_DMA && !device->tx_dma_bound)
         return PAL_UART_STATUS_UNSUPPORTED;
     if (device->next_tx_start_result != PAL_UART_STATUS_OK) {
@@ -274,18 +270,15 @@ PalUartStatus PAL_UART_Port_StartTx(PalUartId id, PalUartAsyncMode mode,
         device->next_tx_start_result = PAL_UART_STATUS_OK;
         return status;
     }
-    device->tx = (PendingTransfer){.tx_data = data, .length = length,
-                                    .completion = completion, .context = context};
+    device->tx = (PendingTransfer){.tx_data = data, .length = length};
     return PAL_UART_STATUS_OK;
 }
 
-PalUartStatus PAL_UART_Port_StartRx(PalUartId id, PalUartAsyncMode mode,
-                                     uint8_t *data, size_t length,
-                                     PalUartCompletion completion, void *context)
+PalUartStatus PAL_UART_Port_StartRx(void *port_context, PalUartAsyncMode mode,
+                                     uint8_t *data, size_t length)
 {
-    HostUart *device;
-    PalUartStatus status = PAL_UART_Host_Lookup(id, &device);
-    if (status != PAL_UART_STATUS_OK) return status;
+    HostUart *device = port_context;
+    PalUartStatus status;
     if (mode == PAL_UART_ASYNC_DMA && !device->rx_dma_bound)
         return PAL_UART_STATUS_UNSUPPORTED;
     if (device->next_rx_start_result != PAL_UART_STATUS_OK) {
@@ -293,22 +286,18 @@ PalUartStatus PAL_UART_Port_StartRx(PalUartId id, PalUartAsyncMode mode,
         device->next_rx_start_result = PAL_UART_STATUS_OK;
         return status;
     }
-    device->rx = (PendingTransfer){.rx_data = data, .length = length,
-                                    .completion = completion, .context = context};
+    device->rx = (PendingTransfer){.rx_data = data, .length = length};
     PAL_UART_Host_FinishRxIfReady(device);
     return PAL_UART_STATUS_OK;
 }
 
-PalUartStatus PAL_UART_Port_Cancel(PalUartId id, PalUartDirection direction)
+PalUartStatus PAL_UART_Port_Cancel(void *port_context, PalUartDirection direction)
 {
-    HostUart *device;
-    PalUartStatus status = PAL_UART_Host_Lookup(id, &device);
-    if (status != PAL_UART_STATUS_OK) return status;
+    HostUart *device = port_context;
     PendingTransfer *slot = direction == PAL_UART_DIR_TX ? &device->tx : &device->rx;
-    if (slot->completion == NULL) return PAL_UART_STATUS_NOT_ACTIVE;
-    PendingTransfer pending = *slot;
+    if (slot->length == 0) return PAL_UART_STATUS_NOT_ACTIVE;
     memset(slot, 0, sizeof *slot);
-    pending.completion(id, direction, PAL_UART_STATUS_CANCELLED, 0, pending.context);
+    PAL_UART_AsyncFinish(device->id, direction, PAL_UART_TRANSFER_CANCELLED, 0, PAL_UART_ERROR_NONE);
     return PAL_UART_STATUS_OK;
 }
 
@@ -325,23 +314,23 @@ PalUartStatus PAL_UART_Host_FeedRx(PalUartId id, const uint8_t *data, size_t len
     return PAL_UART_STATUS_OK;
 }
 
-PalUartStatus PAL_UART_Host_CompleteTx(PalUartId id, PalUartStatus status,
-                                         size_t transferred)
+PalUartStatus PAL_UART_Host_CompleteTx(PalUartId id, PalUartTransferResult result,
+                                         size_t transferred, PalUartErrors errors)
 {
     HostUart *device;
     PalUartStatus found = PAL_UART_Host_Lookup(id, &device);
     if (found != PAL_UART_STATUS_OK) return found;
     PendingTransfer pending = device->tx;
-    if (pending.completion == NULL) return PAL_UART_STATUS_NOT_ACTIVE;
+    if (pending.length == 0) return PAL_UART_STATUS_NOT_ACTIVE;
     if (transferred > pending.length ||
-        (status != PAL_UART_STATUS_OK && status != PAL_UART_STATUS_IO_ERROR) ||
-        (status == PAL_UART_STATUS_OK && transferred != pending.length))
+        (result != PAL_UART_TRANSFER_OK && result != PAL_UART_TRANSFER_ABORTED) ||
+        (result == PAL_UART_TRANSFER_OK && transferred != pending.length))
         return PAL_UART_STATUS_INVALID_ARGUMENT;
     if (transferred > HOST_BUFFER_SIZE - device->tx_size) return PAL_UART_STATUS_BUSY;
     memcpy(device->tx_queue + device->tx_size, pending.tx_data, transferred);
     device->tx_size += transferred;
     memset(&device->tx, 0, sizeof device->tx);
-    pending.completion(id, PAL_UART_DIR_TX, status, transferred, pending.context);
+    PAL_UART_AsyncFinish(id, PAL_UART_DIR_TX, result, transferred, errors);
     return PAL_UART_STATUS_OK;
 }
 

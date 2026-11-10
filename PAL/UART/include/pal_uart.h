@@ -39,14 +39,26 @@ PalUartStatus PAL_UART_Read(PalUartId id, uint8_t *data, size_t length,
 /* One outstanding transfer per direction. Buffers must remain valid until the
  * callback; DMA buffers must also satisfy target memory/cache constraints.
  * Accepted requests invoke the callback exactly once, including on cancel.
- * A rejected request never invokes it. The Port checks actual resource binding
- * and driver state. Callbacks may run in interrupt context. */
+ * A rejected request never invokes it. Start returns PalUartStatus; OK means
+ * acceptance, while the callback reports the terminal PalUartTransferResult.
+ * The Port checks actual resource binding and driver state. Callbacks may run in interrupt context. */
 PalUartStatus PAL_UART_StartTx(PalUartId id, PalUartAsyncMode mode,
                                 const uint8_t *data, size_t length,
                                 PalUartCompletion completion, void *context);
 PalUartStatus PAL_UART_StartRx(PalUartId id, PalUartAsyncMode mode,
                                 uint8_t *data, size_t length,
                                 PalUartCompletion completion, void *context);
+/**
+ * @brief Requests cancellation of one asynchronous transfer direction.
+ * @param id UART instance containing the request.
+ * @param direction Direction to cancel: PAL_UART_DIR_TX or PAL_UART_DIR_RX.
+ * @return Operation status; PAL_UART_STATUS_OK means cancellation was accepted.
+ * @note Acceptance does not mean cancellation has completed. The request's
+ * completion callback reports PAL_UART_TRANSFER_CANCELLED after the transfer
+ * has stopped; it may run before this function returns. NOT_ACTIVE means no request;
+ * BUSY means a cancellation is already pending. Errors detected before completion
+ * remain available in the completion callback, including on cancellation.
+ */
 PalUartStatus PAL_UART_Cancel(PalUartId id, PalUartDirection direction);
 
 #endif

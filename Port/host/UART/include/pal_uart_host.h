@@ -24,8 +24,16 @@ PalUartStatus PAL_UART_Host_SetNextStartResult(PalUartId id,
                                                    PalUartDirection direction,
                                                    PalUartStatus status);
 PalUartStatus PAL_UART_Host_FeedRx(PalUartId id, const uint8_t *data, size_t length);
-PalUartStatus PAL_UART_Host_CompleteTx(PalUartId id, PalUartStatus status,
-                                         size_t transferred);
+/**
+ * @brief Completes a pending TX with an OK or aborted transfer result.
+ * @param id UART instance to complete.
+ * @param result Terminal result to simulate: PAL_UART_TRANSFER_OK or PAL_UART_TRANSFER_ABORTED.
+ * @param transferred Number of bytes transferred by the simulated request.
+ * @param errors Detected errors to return with this completion.
+ * @return Status of the helper operation, independent of the transfer result.
+ */
+PalUartStatus PAL_UART_Host_CompleteTx(PalUartId id, PalUartTransferResult result,
+                                         size_t transferred, PalUartErrors errors);
 size_t PAL_UART_Host_TakeTx(PalUartId id, uint8_t *out, size_t capacity);
 
 #endif
