@@ -1,10 +1,32 @@
+/**
+ * @file ring_blk_buf.c
+ * @brief Contiguous ring allocation, block publication, and descriptor recycling.
+ *
+ * Free descriptors and active blocks are tracked by intrusive singly linked
+ * lists. Allocation uses the active head and tail to locate contiguous space;
+ * read and free operations scan the used list. Public operation contracts are
+ * documented in ring_blk_buf.h.
+ */
+
 #include "ring_blk_buf.h"
 
+/**
+ * @brief Enter the instance's optional critical section.
+ * @param[in,out] rbb Initialized, non-NULL instance.
+ * @return Token from the acquire callback, or zero if no callback is installed.
+ * @note The token must be passed unchanged to RingBlockBuffer_Exit().
+ */
 static uintptr_t RingBlockBuffer_Enter(RingBlockBuffer* rbb)
 {
     return rbb->lock.acquire != NULL ? rbb->lock.acquire(&rbb->lock) : 0;
 }
 
+/**
+ * @brief Leave the instance's optional critical section.
+ * @param[in,out] rbb Initialized, non-NULL instance used for the matching entry.
+ * @param[in] state Token returned by RingBlockBuffer_Enter().
+ * @note Does nothing if no release callback is installed.
+ */
 static void RingBlockBuffer_Exit(RingBlockBuffer* rbb, uintptr_t state)
 {
     if (rbb->lock.release != NULL)
@@ -13,6 +35,17 @@ static void RingBlockBuffer_Exit(RingBlockBuffer* rbb, uintptr_t state)
     }
 }
 
+/**
+ * @brief Check whether a pointer identifies a descriptor in this instance's pool.
+ * @param[in] rbb Initialized, non-NULL instance with a valid descriptor pool.
+ * @param[in] block Candidate descriptor address; it is not dereferenced.
+ * @retval true The address matches an element of the configured descriptor pool.
+ * @retval false The address is outside the pool or not on a descriptor boundary.
+ * @note This O(1) check assumes monotonically addressed contiguous array storage
+ *       with sizeof(Block) stride. Integer address comparisons avoid relational
+ *       comparisons between unrelated C pointers. Membership does not establish
+ *       ownership, lifecycle state, or freshness after descriptor reuse.
+ */
 static bool RingBlockBuffer_IsPoolBlock(const RingBlockBuffer* rbb, const Block* block)
 {
     uintptr_t first = (uintptr_t)rbb->block_pool;
@@ -32,6 +65,14 @@ static bool RingBlockBuffer_IsPoolBlock(const RingBlockBuffer* rbb, const Block*
     return index < rbb->max_block_num && block == &rbb->block_pool[index];
 }
 
+/**
+ * @brief Append an active block to allocation order and update the used-list tail.
+ * @param[in,out] rbb Initialized instance, or NULL for no action.
+ * @param[in,out] block Descriptor to append, or NULL for no action.
+ * @pre For non-NULL arguments, the descriptor must be detached from any list and
+ *      the caller must hold the instance's critical section when locking is enabled.
+ * @note Does not acquire a lock or change the block's payload metadata or status.
+ */
 static void RingBlockBuffer_UsedListAppend(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
@@ -42,6 +83,16 @@ static void RingBlockBuffer_UsedListAppend(RingBlockBuffer* rbb, Block* block)
     rbb->tail = &block->list_node;
 }
 
+/**
+ * @brief Unlink a block from allocation order and repair the tail if needed.
+ * @param[in,out] rbb Initialized instance containing the used list.
+ * @param[in] block Descriptor whose list node is sought; the descriptor is not modified.
+ * @retval true The node was found and unlinked.
+ * @retval false Either argument is NULL or the node is absent from the used list.
+ * @pre The caller must hold the instance's critical section when locking is enabled.
+ * @note Searches in O(max_block_num). Removing the sole block resets the tail to
+ *       the used-list sentinel. The removed node's next pointer is left unchanged.
+ */
 static bool RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
@@ -66,6 +117,7 @@ static bool RingBlockBuffer_UsedListRemove(RingBlockBuffer* rbb, Block* block)
     return false;
 }
 
+/** @see RingBlockBuffer_Init() for the public initialization contract. */
 BufferStatus RingBlockBuffer_Init(
     RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
     const Lock* lock
@@ -101,6 +153,7 @@ BufferStatus RingBlockBuffer_Init(
     return BUFFER_OK;
 }
 
+/** @see RingBlockBuffer_AllocateBlock() for reservation and ownership requirements. */
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block)
 {
     if (allocated_block != NULL)
@@ -133,7 +186,9 @@ BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_si
         Block* head = SLinkedList_First_Entry(&rbb->used_list, Block, list_node);
         Block* tail = SLinkedList_Entry(rbb->tail, Block, list_node);
 
-        /* Situation 1:
+        /* Situation 1: The active range does not wrap. Try space after the tail
+         * first, then wrap to the buffer start if the prefix can fit the block.
+         * Internal gaps are not searched. The tail marker shows its payload end.
          * +----------------+---------------------------------------+--------------+
          * |   free block   |               used blocks             |  free block  |
          * +----------------+---------------------------------------+--------------+
@@ -151,7 +206,9 @@ BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_si
                 data = rbb->buffer;
             }
         }
-        /* Situation 2:
+        /* Situation 2: The active range wraps. Allocate only between the tail's
+         * payload end and the head; the new block itself must not wrap.
+         * The tail marker shows its payload end.
          * +----------------+---------------------------------------+--------------+
          * |   used block   |               free blocks             |  used block  |
          * +----------------+---------------------------------------+--------------+
@@ -182,6 +239,7 @@ done:
     return result;
 }
 
+/** @see RingBlockBuffer_WriteBlock() for publication and length requirements. */
 BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block, size_t actual_size)
 {
     if (rbb == NULL || block == NULL)
@@ -208,6 +266,7 @@ BufferStatus RingBlockBuffer_WriteBlock(RingBlockBuffer* rbb, Block* block, size
     return result;
 }
 
+/** @see RingBlockBuffer_ReadBlock() for read ordering and consumer ownership. */
 BufferStatus RingBlockBuffer_ReadBlock(RingBlockBuffer* rbb, Block** block)
 {
     if (block != NULL)
@@ -245,6 +304,7 @@ done:
     return result;
 }
 
+/** @see RingBlockBuffer_FreeBlock() for release and cancellation requirements. */
 BufferStatus RingBlockBuffer_FreeBlock(RingBlockBuffer* rbb, Block* block)
 {
     if (rbb == NULL || block == NULL)
