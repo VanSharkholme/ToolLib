@@ -14,14 +14,23 @@
 
 typedef struct
 {
-    const Log_Backend* backend;
+    /* The pointer table is copied by log_init. Backend instances and their
+     * contexts must remain valid and unchanged until log_deinit succeeds. */
+    Log_BackendTable backends;
+    size_t backend_count;
     Log_Level runtime_level;
     bool enable_color;
     bool enable_timestamp;
 } Log_Config;
 
 
+/* Serialize init/deinit against all producers and log_process. No transfers
+ * may be started by backend init. A failed init may require log_deinit retries
+ * if rollback fails; log_init returns BUSY until cleanup succeeds. */
 Log_Status log_init(const Log_Config* config);
+/* Returns BUSY without changing the logger while a transfer is in flight.
+ * Other cleanup failures disable logging and may be retried. Pending queued
+ * logs are discarded on successful teardown; this function does not flush. */
 Log_Status log_deinit(void);
 
 void log_write(
@@ -36,9 +45,11 @@ void log_vwrite(
     const char *format, va_list args
 );
 
-void log_process(void);
-
-void log_backend_tx_complete(void *context);
+/* Single consumer only. NEXT means continue immediately; RETRY means wait
+ * with a finite retry timeout; WAIT means wait for a notification; ERROR means
+ * a buffer operation failed. Async backends report completion through
+ * log_backend_tx_complete with the context received during initialization. */
+Log_ProcessResult log_process(void);
 
 void log_set_level(Log_Level level);
 

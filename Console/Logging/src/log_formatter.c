@@ -241,14 +241,15 @@ size_t log_formatter_write_tail(char *buffer, size_t buffer_size)
     size_t offset = 0;
 
 #if LOG_ENABLE_COLOR
-    memcpy(buffer + offset, LOG_CTRL_RESET, sizeof(LOG_CTRL_RESET));
-    offset += sizeof(LOG_CTRL_RESET);
+    memcpy(buffer + offset, LOG_CTRL_RESET, sizeof(LOG_CTRL_RESET) - 1);
+    offset += sizeof(LOG_CTRL_RESET) - 1;
 #endif
 
 #if LOG_AUTO_NEWLINE
     buffer[offset++] = '\n';
 #endif
     buffer[offset] = '\0';
+    return offset;
 }
 
 size_t log_formatter_process(

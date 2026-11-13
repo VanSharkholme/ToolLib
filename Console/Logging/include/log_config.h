@@ -12,6 +12,12 @@
 
 #define LOG_BUFFER_SIZE             2048
 #define LOG_MAX_RECORD_NUM          8
+#ifndef LOG_MAX_BACKENDS
+#define LOG_MAX_BACKENDS            4
+#endif
+#if LOG_MAX_BACKENDS < 1
+#error "LOG_MAX_BACKENDS must be positive."
+#endif
 #define LOG_MAX_SINGLE_LOG_LENGTH   126
 #define LOG_MAX_TAG_LENGTH          15
 #define LOG_MIN_CONTENT_LENGTH      64
@@ -19,6 +25,7 @@
 #define LOG_MAX_FILE_NAME_LENGTH    15
 
 #define LOG_USE_ASYNC               1
+#define LOG_USE_EVENT_WAKEUP        1
 #define LOG_USE_CUSTOM_VSNPRINTF    0
 
 #endif //TOOLLIB_LOG_CONFIG_H

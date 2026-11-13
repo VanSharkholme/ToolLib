@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 
+add_subdirectory(backends)
 set(module logging)
 
 add_library(logging STATIC)
-file(GLOB log_src
+file(GLOB log_src CONFIGURE_DEPENDS
     backends/*.c
-    ports/*.c
+#    ports/*.c
     src/*.c
 )
 target_sources(logging PRIVATE ${log_src})

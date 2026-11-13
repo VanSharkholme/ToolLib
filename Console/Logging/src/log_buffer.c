@@ -27,13 +27,33 @@ BufferStatus log_buffer_deinit(void)
 
 BufferStatus log_buffer_allocate(Block **buffer)
 {
+    if (buffer == NULL)
+        return BUFFER_INVALID_ARGS;
     *buffer = NULL;
     BufferStatus status = RingBlockBuffer_AllocateBlock(&log_rbb, LOG_MAX_SINGLE_LOG_LENGTH, buffer);
     return status;
 }
 
-BufferStatus log_buffer_write(Block *block, size_t size)
+BufferStatus log_buffer_free(Block *buffer)
 {
-    BufferStatus status = RingBlockBuffer_WriteBlock(&log_rbb, block, size);
+    if (buffer == NULL)
+        return BUFFER_INVALID_ARGS;
+    BufferStatus status = RingBlockBuffer_FreeBlock(&log_rbb, buffer);
+    return status;
+}
+
+BufferStatus log_buffer_write(Block *buffer, size_t size)
+{
+    if (buffer == NULL)
+        return BUFFER_INVALID_ARGS;
+    BufferStatus status = RingBlockBuffer_WriteBlock(&log_rbb, buffer, size);
+    return status;
+}
+
+BufferStatus log_buffer_read(Block **buffer)
+{
+    if (buffer == NULL)
+        return BUFFER_INVALID_ARGS;
+    BufferStatus status = RingBlockBuffer_ReadBlock(&log_rbb, buffer);
     return status;
 }

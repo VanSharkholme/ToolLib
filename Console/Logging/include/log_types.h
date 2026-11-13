@@ -32,8 +32,19 @@ typedef enum
     LOG_STATUS_BUFFER_ERROR,
     LOG_STATUS_BUFFER_FULL,
     LOG_STATUS_FORMAT_ERROR,
-    LOG_STATUS_BACKEND_ERROR
+    LOG_STATUS_BACKEND_ERROR,
+    LOG_STATUS_ALREADY_INITIALIZED,
+    LOG_STATUS_BUSY,
+    LOG_STATUS_PORT_ERROR
 } Log_Status;
+
+typedef enum
+{
+    LOG_PROCESS_NEXT,
+    LOG_PROCESS_WAIT,
+    LOG_PROCESS_RETRY,
+    LOG_PROCESS_ERROR,
+} Log_ProcessResult;
 
 typedef struct
 {
@@ -43,6 +54,7 @@ typedef struct
     uint32_t truncated;
     uint32_t format_errors;
     uint32_t backend_errors;
+    uint32_t buffer_errors;
 } Log_Stats;
 
 #endif //TOOLLIB_LOG_TYPES_H
