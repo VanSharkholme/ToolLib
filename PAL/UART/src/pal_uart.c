@@ -173,7 +173,7 @@ static PalUartStatus PAL_UART_CheckAsyncParam(
     size_t length, PalUartCompletion completion
 )
 {
-    if (data == NULL || length == 0 || completion == NULL ||
+    if (data == NULL || length == 0 ||
         (mode != PAL_UART_ASYNC_IRQ && mode != PAL_UART_ASYNC_DMA))
         return PAL_UART_STATUS_INVALID_ARGUMENT;
     return PAL_UART_STATUS_OK;
