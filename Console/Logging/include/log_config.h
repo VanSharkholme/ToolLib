@@ -5,9 +5,9 @@
 #ifndef TOOLLIB_LOG_CONFIG_H
 #define TOOLLIB_LOG_CONFIG_H
 
-#define LOG_ENABLE_COLOR            1
-#define LOG_ENABLE_FILE_LINE        1
-#define LOG_ENABLE_TIMESTAMP        1
+#define LOG_ENABLE_COLOR            0
+#define LOG_ENABLE_FILE_LINE        0
+#define LOG_ENABLE_TIMESTAMP        0
 #define LOG_AUTO_NEWLINE            1
 
 #define LOG_BUFFER_SIZE             2048
@@ -27,5 +27,6 @@
 #define LOG_USE_ASYNC               1
 #define LOG_USE_EVENT_WAKEUP        1
 #define LOG_USE_CUSTOM_VSNPRINTF    0
-
+#define LOG_USE_CUSTOM_TASK_ENTRY   0
+#define LOG_DEFAULT_TASK_STACK_SIZE 512 /**< In bytes. */
 #endif //TOOLLIB_LOG_CONFIG_H

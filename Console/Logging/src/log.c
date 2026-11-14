@@ -35,16 +35,16 @@ static Log_Status log_cleanup(void)
             return status;
         log_context.backend_manager_active = false;
     }
-    if (log_context.port_initialized)
-    {
-        log_port_deinit();
-        log_context.port_initialized = false;
-    }
     if (log_context.buffer_initialized)
     {
         if (log_buffer_deinit() != BUFFER_OK)
             return LOG_STATUS_BUFFER_ERROR;
         log_context.buffer_initialized = false;
+    }
+    if (log_context.port_initialized)
+    {
+        log_port_deinit();
+        log_context.port_initialized = false;
     }
     memset(&log_context, 0, sizeof(log_context));
     return LOG_STATUS_OK;
@@ -63,15 +63,15 @@ Log_Status log_init(const Log_Config* config)
     if (status != LOG_STATUS_OK)
         return status;
 
-    if (log_buffer_init() != BUFFER_OK)
-        return LOG_STATUS_BUFFER_ERROR;
-    log_context.buffer_initialized = true;
     if (log_port_init() != LOG_PORT_OK)
     {
         (void)log_cleanup();
         return LOG_STATUS_PORT_ERROR;
     }
     log_context.port_initialized = true;
+    if (log_buffer_init() != BUFFER_OK)
+        return LOG_STATUS_BUFFER_ERROR;
+    log_context.buffer_initialized = true;
 
     /* Even a partially initialized manager must be cleaned up on failure. */
     log_context.backend_manager_active = true;
@@ -178,3 +178,29 @@ Log_ProcessResult log_process(void)
         return LOG_PROCESS_NEXT;
     return LOG_PROCESS_WAIT;
 }
+
+#if !LOG_USE_CUSTOM_TASK_ENTRY
+void log_task_entry(void* argument)
+{
+    (void)argument;
+    uint32_t wait_time_ms = UINT32_MAX;
+    while (1)
+    {
+        Log_ProcessResult result = log_process();
+        if (result == LOG_PROCESS_NEXT)
+            continue;
+        if (result == LOG_PROCESS_ERROR)
+        {
+            break;
+        }
+        if (result == LOG_PROCESS_RETRY)
+            wait_time_ms = 500;
+        if (result == LOG_PROCESS_WAIT)
+            wait_time_ms = UINT32_MAX;
+#if LOG_USE_EVENT_WAKEUP
+        log_port_wait(wait_time_ms);
+#endif
+    }
+    log_deinit();
+}
+#endif
