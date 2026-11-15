@@ -5,10 +5,14 @@
 #ifndef TOOLLIB_LOG_CONFIG_H
 #define TOOLLIB_LOG_CONFIG_H
 
+#ifndef LOG_ENABLE_COLOR
 #define LOG_ENABLE_COLOR            0
+#endif
 #define LOG_ENABLE_FILE_LINE        0
 #define LOG_ENABLE_TIMESTAMP        0
+#ifndef LOG_AUTO_NEWLINE
 #define LOG_AUTO_NEWLINE            1
+#endif
 
 #define LOG_BUFFER_SIZE             2048
 #define LOG_MAX_RECORD_NUM          8

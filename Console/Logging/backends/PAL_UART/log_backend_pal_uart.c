@@ -26,6 +26,7 @@ void log_backend_pal_uart_configure(Log_Backend* backend, Log_Backend_PalUart_Co
     backend->is_async = true;
     backend->ops = &pal_uart_backend_ops_dma;
     backend->context = (void*)context;
+    backend->strip_color = false;
 }
 
 static Log_Backend_Status log_backend_pal_uart_init(void* cb_context, void* backend_context)

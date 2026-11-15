@@ -109,6 +109,11 @@ typedef enum
     GRAY
 } LOG_TEXT_COLOR;
 
+/* Select a read-only slice of a complete formatter record (size excludes NUL).
+ * Only known boundary sequences are removed; embedded ANSI is preserved.
+ * No-op when color generation is disabled. The slice need not end in NUL. */
+void log_formatter_strip_color(const uint8_t **data, size_t *size);
+
 size_t log_formatter_process(
     char *buffer, size_t buffer_size,
     Log_Level level, const char *tag,

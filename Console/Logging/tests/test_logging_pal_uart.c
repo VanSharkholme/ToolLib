@@ -99,6 +99,7 @@ void setUp(void)
     for (size_t i = 0; i < 2; ++i)
     {
         contexts[i] = (Log_Backend_PalUart_Context){.id = i == 0 ? PAL_UART1 : PAL_UART2};
+        backends[i].strip_color = true;
         log_backend_pal_uart_configure(&backends[i], &contexts[i]);
     }
 }
@@ -113,6 +114,7 @@ static void test_uart_shared_ops_keep_completion_contexts_separate(void)
     for (size_t i = 0; i < 2; ++i)
     {
         TEST_ASSERT_TRUE(backends[i].is_async);
+        TEST_ASSERT_FALSE(backends[i].strip_color);
         TEST_ASSERT_EQUAL_PTR(&contexts[i], backends[i].context);
         TEST_ASSERT_EQUAL(LOG_BACKEND_OK,
             backends[i].ops->init(&completions[i], backends[i].context));

@@ -1,5 +1,34 @@
 # Logging backend initialization
 
+Each backend instance can opt out of formatter-generated ANSI colors:
+
+```c
+log_backend_pal_uart_configure(&uart_backend, &uart_context);
+uart_backend.strip_color = false; /* configure already sets this default */
+file_backend.strip_color = true;
+```
+
+Set `strip_color` before `log_init` and keep it unchanged until `log_deinit`
+succeeds. Zero-initialized descriptors retain the full record. Manually
+assigned descriptors must initialize this field as well.
+
+`LOG_ENABLE_COLOR` controls whether the formatter generates colors at all;
+when disabled, `strip_color` has no effect. Color and automatic-newline macros
+can also be supplied as compiler definitions. Timestamp, file/line and newline
+settings remain global. The legacy `Log_Config.enable_color` and
+`enable_timestamp` fields currently have no effect; timestamp output itself is
+not yet implemented.
+
+With color enabled, records are laid out as color prefix, log text, optional
+newline, then color reset (the reset now follows the newline). A color-free
+backend receives a read-only slice of the same buffer, including the newline.
+Only recognized boundary sequences are omitted; ANSI sequences in the message
+body remain intact. Transmission length excludes the terminating NUL, and a
+slice is not necessarily NUL-terminated. Backends must honor the supplied length.
+No record is copied or changed during dispatch or retries, and the original
+buffer remains alive until all backends finish. This saves transmitted/stored
+bytes, not queue capacity or formatter space.
+
 Configure a fixed table of backend instances at startup:
 
 ```c
@@ -86,9 +115,10 @@ port remains unfinished, so passing host tests does not establish RTOS or
 hardware readiness. The configuration example assumes application-provided
 backend instances, not a supplied USB implementation.
 
-Build `test_logging_lifecycle` and `test_logging_pal_uart`, then run
+Build `test_logging_lifecycle`, `test_logging_pal_uart` and the four
+`test_logging_color_<color>_<newline>` targets (each switch is 0 or 1), then run
 `ctest -L logging` in the configured build directory. Lifecycle tests link the logging core against fake
-backends and buffer/port/formatter stubs to inject lifecycle failures and check
+backends and buffer/port stubs to inject lifecycle failures and check
 multi-backend synchronous sends, BUSY retries, buffer retention and in-flight
 teardown protection without requiring a UART or RTOS. They also exercise
 out-of-order, inline and cancelled asynchronous completions through the fixed
@@ -96,3 +126,7 @@ entry point. UART adapter tests use PAL stubs and a captured completion entry
 point to verify shared operations, separate contexts and PAL result mapping.
 Test IRQ hooks check critical-section pairing; they do not validate real
 interrupt concurrency.
+
+Color tests compile the real formatter and manager under all four color/newline
+combinations, checking byte slices, truncation, boundary recognition and
+asynchronous retry/completion behavior.

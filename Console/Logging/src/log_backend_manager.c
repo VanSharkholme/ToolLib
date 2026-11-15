@@ -5,6 +5,7 @@
 #include "lock.h"
 #include "log_config.h"
 #include "log_port.h"
+#include "log_formatter.h"
 
 typedef enum
 {
@@ -192,7 +193,11 @@ Log_BackendSummary log_backend_manager_process(const uint8_t *data, size_t size)
         if (!log_backend_try_start(runtime))
             continue;
         Log_BackendPtr backend = runtime->backend;
-        Log_Backend_Status status = backend->ops->transmit(data, size, backend->context);
+        const uint8_t *tx_data = data;
+        size_t tx_size = size;
+        if (backend->strip_color)
+            log_formatter_strip_color(&tx_data, &tx_size);
+        Log_Backend_Status status = backend->ops->transmit(tx_data, tx_size, backend->context);
         if (status == LOG_BACKEND_BUSY)
             log_backend_set_tx_state(runtime, LOG_BACKEND_TX_STATE_IDLE);
         else if (status != LOG_BACKEND_OK)

@@ -171,19 +171,10 @@ void log_port_notify(void)
     ++notify_calls;
 }
 
-size_t log_formatter_process(char *buffer, size_t size, Log_Level level,
-                             const char *tag, const char *file, uint32_t line,
-                             const char *format, va_list args)
+bool log_port_wait(uint32_t timeout_ms)
 {
-    (void)buffer;
-    (void)size;
-    (void)level;
-    (void)tag;
-    (void)file;
-    (void)line;
-    (void)format;
-    (void)args;
-    return 0;
+    (void)timeout_ms;
+    return false;
 }
 
 void setUp(void)

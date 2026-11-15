@@ -54,6 +54,9 @@ typedef struct
     bool is_async;
     const Log_Backend_Ops *ops;
     void* context;
+    /* Omit formatter-owned color wrappers. Configure before log_init and keep
+     * unchanged until log_deinit succeeds. False preserves the full record. */
+    bool strip_color;
 } Log_Backend;
 
 /* Pointer to a backend descriptor that cannot be modified through this pointer. */

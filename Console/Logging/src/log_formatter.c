@@ -240,16 +240,53 @@ size_t log_formatter_write_tail(char *buffer, size_t buffer_size)
 {
     size_t offset = 0;
 
+    /* Keep the newline inside the contiguous, color-free record slice. */
+#if LOG_AUTO_NEWLINE
+    buffer[offset++] = '\n';
+#endif
+
 #if LOG_ENABLE_COLOR
     memcpy(buffer + offset, LOG_CTRL_RESET, sizeof(LOG_CTRL_RESET) - 1);
     offset += sizeof(LOG_CTRL_RESET) - 1;
 #endif
 
-#if LOG_AUTO_NEWLINE
-    buffer[offset++] = '\n';
-#endif
     buffer[offset] = '\0';
     return offset;
+}
+
+void log_formatter_strip_color(const uint8_t **data, size_t *size)
+{
+#if LOG_ENABLE_COLOR
+    if (data == NULL || size == NULL || *data == NULL)
+        return;
+    static const struct
+    {
+        const char *text;
+        size_t length;
+    } colors[] = {
+        {LOG_COLOR_E, sizeof(LOG_COLOR_E) - 1},
+        {LOG_COLOR_W, sizeof(LOG_COLOR_W) - 1},
+        {LOG_COLOR_I, sizeof(LOG_COLOR_I) - 1},
+        {LOG_COLOR_D, sizeof(LOG_COLOR_D) - 1},
+    };
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); ++i)
+    {
+        if (*size >= colors[i].length &&
+            memcmp(*data, colors[i].text, colors[i].length) == 0)
+        {
+            *data += colors[i].length;
+            *size -= colors[i].length;
+            break;
+        }
+    }
+    const size_t reset_length = sizeof(LOG_CTRL_RESET) - 1;
+    if (*size >= reset_length &&
+        memcmp(*data + *size - reset_length, LOG_CTRL_RESET, reset_length) == 0)
+        *size -= reset_length;
+#else
+    (void)data;
+    (void)size;
+#endif
 }
 
 size_t log_formatter_process(
