@@ -4,7 +4,9 @@
 #include "pal_uart.h"
 
 /* Single-threaded host fake for module tests. Callbacks run synchronously
- * from these helpers. DMA binding and driver start failures are injectable. */
+ * from these helpers. DMA binding and driver start failures are injectable.
+ * Blocking and asynchronous RX support fixed lengths only: to_idle=true returns
+ * UNSUPPORTED without consuming queued data or next-start fault injection. */
 void PAL_UART_Host_Reset(void);
 /* Configure the fake board's generated defaults and wired directions. */
 PalUartStatus PAL_UART_Host_Define(PalUartId id,

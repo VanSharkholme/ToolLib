@@ -1,6 +1,7 @@
 #ifndef TOOLLIB_PAL_UART_H
 #define TOOLLIB_PAL_UART_H
 
+#include <stdbool.h>
 #include "pal_uart_types.h"
 
 /* Caller coordinates tasks, interrupts and callbacks for each device. These
@@ -29,12 +30,20 @@ PalUartStatus PAL_UART_DeInit(PalUartId id);
  * return NOT_INITIALIZED for an instance that is not currently bound. */
 PalUartStatus PAL_UART_Detach(PalUartId id);
 
-/* Reads exactly length bytes or returns TIMEOUT with a partial count. The
- * transferred output is set to zero before each valid port call. */
+/* Writes length bytes, reporting the actual count, including on timeout.
+ * transferred is set to zero before argument validation. */
 PalUartStatus PAL_UART_Write(PalUartId id, const uint8_t *data, size_t length,
                              uint32_t timeout_ms, size_t *transferred);
-PalUartStatus PAL_UART_Read(PalUartId id, uint8_t *data, size_t length,
-                            uint32_t timeout_ms, size_t *transferred);
+/* With to_idle=false, reads exactly length bytes on success. With to_idle=true,
+ * length is the buffer capacity: success means full capacity or an idle-line
+ * event after at least one byte. Idle alone before receiving data does not finish
+ * the read. timeout_ms covers the whole read; IDLE is not a timeout or error.
+ * transferred is zeroed before validation and reports the actual count, including
+ * partial reads on timeout. Unsupported idle reception returns UNSUPPORTED. */
+PalUartStatus PAL_UART_Read(
+    PalUartId id, bool to_idle, uint8_t *data,
+    size_t length, uint32_t timeout_ms, size_t *transferred
+);
 
 /* One outstanding transfer per direction. Buffers must remain valid until the
  * callback; DMA buffers must also satisfy target memory/cache constraints.
@@ -45,9 +54,18 @@ PalUartStatus PAL_UART_Read(PalUartId id, uint8_t *data, size_t length,
 PalUartStatus PAL_UART_StartTx(PalUartId id, PalUartAsyncMode mode,
                                 const uint8_t *data, size_t length,
                                 PalUartCompletion completion, void *context);
-PalUartStatus PAL_UART_StartRx(PalUartId id, PalUartAsyncMode mode,
-                                uint8_t *data, size_t length,
-                                PalUartCompletion completion, void *context);
+/* Uses the same fixed-length / idle-line completion conditions as Read.
+ * For to_idle=true, length is capacity and completion reports the actual count;
+ * IDLE itself is successful completion, not RX_TIMEOUT. No receive timeout is
+ * configured by this API. The request ends once, on full capacity or IDLE after
+ * data (or cancellation/error); submit a new request to receive again.
+ * This is not continuous/circular DMA reception. Unsupported idle reception
+ * returns UNSUPPORTED without invoking completion. */
+PalUartStatus PAL_UART_StartRx(
+    PalUartId id, PalUartAsyncMode mode,
+    uint8_t *data, size_t length,
+    bool to_idle, PalUartCompletion completion, void *context
+);
 /**
  * @brief Requests cancellation of one asynchronous transfer direction.
  * @param id UART instance containing the request.

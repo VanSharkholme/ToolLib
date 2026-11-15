@@ -57,7 +57,7 @@ enum {
  */
 typedef enum
 {
-    PAL_UART_TRANSFER_OK = 0,    /**< The requested transfer completed successfully. */
+    PAL_UART_TRANSFER_OK = 0,    /**< The transfer completed successfully, including RX ending on IDLE when requested. */
     PAL_UART_TRANSFER_CANCELLED, /**< The transfer was cancelled by user. */
     PAL_UART_TRANSFER_FINISHED_WITH_ERROR, /**< The transfer completed with non-fatal errors. */
     PAL_UART_TRANSFER_ABORTED,  /**< The transfer terminated due to fatal errors. */
@@ -100,6 +100,7 @@ typedef struct
  * @param result Terminal transfer result, separate from API operation status.
  * @param transferred Bytes transferred; partial TX counts may include bytes handed
  * to the peripheral but not yet sent on the wire. Data may contain errors.
+ * An idle-terminated RX may succeed with fewer bytes than the buffer capacity.
  * @param errors Accumulated detected errors; independent of the terminal result.
  * @param context User context supplied when the request was submitted.
  * @note The callback may run in interrupt context or before Start/Cancel returns.

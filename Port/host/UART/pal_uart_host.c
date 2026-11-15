@@ -247,9 +247,13 @@ PalUartStatus PAL_UART_Port_Write(void *port_context, const uint8_t *data, size_
     return count == length ? PAL_UART_STATUS_OK : PAL_UART_STATUS_TIMEOUT;
 }
 
-PalUartStatus PAL_UART_Port_Read(void *port_context, uint8_t *data, size_t length,
-                                 uint32_t timeout_ms, size_t *transferred)
+PalUartStatus PAL_UART_Port_Read(
+    void *port_context, bool to_idle, uint8_t *data,
+    size_t length, uint32_t timeout_ms, size_t *transferred
+)
 {
+    /* The host fake has no idle-line event model. Reject before consuming data. */
+    if (to_idle) return PAL_UART_STATUS_UNSUPPORTED;
     HostUart *device = port_context;
     (void)timeout_ms; /* The fake does not wait in real time. */
     size_t count = length < device->rx_size ? length : device->rx_size;
@@ -275,8 +279,10 @@ PalUartStatus PAL_UART_Port_StartTx(void *port_context, PalUartAsyncMode mode,
 }
 
 PalUartStatus PAL_UART_Port_StartRx(void *port_context, PalUartAsyncMode mode,
-                                     uint8_t *data, size_t length)
+                                     uint8_t *data, size_t length, bool to_idle)
 {
+    /* Preserve queued data and next-start fault injection on unsupported requests. */
+    if (to_idle) return PAL_UART_STATUS_UNSUPPORTED;
     HostUart *device = port_context;
     PalUartStatus status;
     if (mode == PAL_UART_ASYNC_DMA && !device->rx_dma_bound)

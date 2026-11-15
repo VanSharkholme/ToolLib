@@ -148,8 +148,8 @@ PalUartStatus PAL_UART_Write(
 }
 
 PalUartStatus PAL_UART_Read(
-    PalUartId id, uint8_t* data, size_t length,
-    uint32_t timeout_ms, size_t* transferred
+    PalUartId id, bool to_idle, uint8_t* data,
+    size_t length, uint32_t timeout_ms, size_t* transferred
 )
 {
     if (transferred != NULL) *transferred = 0;
@@ -157,7 +157,7 @@ PalUartStatus PAL_UART_Read(
     PalUartDevice* device;
     PalUartStatus status = PAL_UART_PrepareTransfer(id, PAL_UART_DIR_RX, &device);
     if (status != PAL_UART_STATUS_OK) return status;
-    return PAL_UART_Port_Read(device->port_context, data, length, timeout_ms, transferred);
+    return PAL_UART_Port_Read(device->port_context, to_idle, data, length, timeout_ms, transferred);
 }
 
 /**
@@ -206,7 +206,7 @@ PalUartStatus PAL_UART_StartTx(
 PalUartStatus PAL_UART_StartRx(
     PalUartId id, PalUartAsyncMode mode,
     uint8_t* data, size_t length,
-    PalUartCompletion completion, void* context
+    bool to_idle, PalUartCompletion completion, void* context
 )
 {
     PalUartStatus status = PAL_UART_CheckAsyncParam(mode, data, length, completion);
@@ -219,7 +219,7 @@ PalUartStatus PAL_UART_StartRx(
     device->rx.callback = completion;
     device->rx.context = context;
     device->rx.length = length;
-    status = PAL_UART_Port_StartRx(device->port_context, mode, data, length);
+    status = PAL_UART_Port_StartRx(device->port_context, mode, data, length, to_idle);
     if (status != PAL_UART_STATUS_OK)
     {
         device->rx = (PalUartAsyncTransfer){0};

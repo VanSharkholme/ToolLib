@@ -2,7 +2,8 @@
 
 `include/pal_uart.h` is the application-facing API. Modules receive a physical
 `PalUartId` from board configuration. IDs need not be contiguous, and must be
-unique across USART, UART and LPUART instances. The public API is unchanged.
+unique across USART, UART and LPUART instances. Receive APIs accept `to_idle`;
+pass `false` for fixed-length reception.
 
 ## Common state and platform responsibilities
 
@@ -65,26 +66,39 @@ The output is zeroed before validation. A transfer in one direction does not
 prevent a transfer in the other direction. A normal transfer timeout does not
 invalidate the device.
 
-Async requests remain managed by the Port in this migration. PAL performs common
-argument, binding, availability, direction and idle checks. The Port owns pending
-buffers, IRQ/DMA completion and cancellation. Accepted requests complete exactly
+PAL performs common argument, binding, availability, direction and idle checks
+and records asynchronous requests. The Port handles pending buffers, hardware
+completion and cancellation. Accepted requests complete exactly
 once, including cancel; rejected requests never invoke the callback. Release
 the request before invoking user code so callbacks can submit work again.
 Callbacks may run in interrupt context or before `Start*` returns. Buffers must
-remain valid until completion; DMA constraints remain platform-specific. RX
-requests exactly the requested length; idle-line/continuous framing is separate.
+remain valid until completion; DMA constraints remain platform-specific.
+
+For `Read` and `StartRx`, `to_idle=false` requires the requested length for normal
+completion. With `to_idle=true`, `length` is buffer capacity: filling the buffer
+or detecting IDLE after at least one byte completes reception successfully.
+IDLE before any data does not complete a request. The actual count is returned
+through `transferred`; IDLE itself is neither a timeout nor an error. The blocking
+timeout covers the whole read; `StartRx` does not configure a receive timeout.
+Async reception remains one-shot and must be submitted again after completion;
+DMA half-transfer events do not complete a request. Continuous/circular DMA is
+not part of this interface. Ports without idle reception return `UNSUPPORTED`.
 
 ## Builds and tests
 
 The header-only `pal_uart_contract` target is shared by PAL, Ports and BSPs;
 Ports do not link back to PAL's implementation. The host Port is selected by
 default for native builds. Cross builds default to `TOOLLIB_UART_PORT=none`
-until the application supplies a hardware Port target. The STM32 implementation
-in H533_Generic supplies lifecycle operations and blocking TX; blocking RX and
-IRQ/DMA/cancel deliberately return `UNSUPPORTED` in this migration.
+until the application supplies a hardware Port target. The STM32H5 implementation
+in `Port/stm32/UART` provides blocking TX/RX, IRQ/normal-DMA transfers and cancel.
+It selects the corresponding HAL ReceiveToIdle operation when `to_idle=true`.
+Board resources and UART/DMA interrupt routing remain application responsibilities.
 
 The host fake keeps simulated hardware state separate from PAL state and does
-not wait in real time. Tests cover sparse IDs, lifecycle ownership, pre-write and
+not wait in real time. It has no IDLE event model: both receive APIs reject
+`to_idle=true` with `UNSUPPORTED` before consuming queued data or next-start fault
+injection, and without creating a pending request or invoking a callback.
+Tests cover that rejection behavior, sparse IDs, lifecycle ownership, pre-write and
 post-write reconfiguration failures, recovery, per-direction busy checks, byte
 counts and the retained asynchronous behavior. `PAL_UART_Host_Reset` resets both
 hardware and embedded common state between tests. Existing reconfiguration error

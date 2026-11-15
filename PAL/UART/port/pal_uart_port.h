@@ -53,7 +53,7 @@ typedef struct {
 typedef struct
 {
     PalUartAsyncState state; /**< Current transfer state. */
-    size_t length; /**< Requested transfer length in bytes. */
+    size_t length; /**< Transfer length in bytes, or buffer capacity for RX to idle. */
     PalUartAsyncMode mode; /**< Requested asynchronous transfer mode. */
     PalUartCompletion callback; /**< Completion callback associated with the request. */
     void *context; /**< User context passed to the completion callback. */
@@ -180,19 +180,24 @@ PalUartStatus PAL_UART_Port_Write(void *port_context, const uint8_t *data, size_
  * @brief Receives bytes using a blocking platform operation.
  *
  * @param[in] port_context Valid platform context obtained from a mapped device.
+ * @param[in] to_idle Whether IDLE after receiving data may complete the read early.
  * @param[out] data Writable buffer with space for at least length bytes.
- * @param[in] length Requested number of bytes; greater than zero.
- * @param[in] timeout_ms Timeout in milliseconds; PAL_UART_WAIT_FOREVER requests no timeout.
+ * @param[in] length Required byte count, or buffer capacity if to_idle; greater than zero.
+ * @param[in] timeout_ms Whole-read timeout in milliseconds; PAL_UART_WAIT_FOREVER requests no timeout.
  * @param[out] transferred Actual byte count, including a partial count on timeout.
  * @pre PAL has validated arguments, binding, availability, RX direction and idle state.
  * @pre data and transferred are non-NULL; the output count was initialized to zero.
- * @retval PAL_UART_STATUS_OK All requested bytes were received.
+ * @retval PAL_UART_STATUS_OK The buffer filled, or to_idle ended on IDLE after receiving data.
  * @retval PAL_UART_STATUS_TIMEOUT The operation timed out; inspect transferred.
  * @retval PAL_UART_STATUS_UNSUPPORTED The operation or a platform requirement is unsupported.
  * @return An appropriate platform status for other driver outcomes.
+ * @note IDLE before any data does not finish reception. IDLE itself is neither
+ * a timeout nor an error. Reject unsupported idle reception before consuming data.
  */
-PalUartStatus PAL_UART_Port_Read(void *port_context, uint8_t *data, size_t length,
-                               uint32_t timeout_ms, size_t *transferred);
+PalUartStatus PAL_UART_Port_Read(
+    void *port_context, bool to_idle, uint8_t *data,
+    size_t length, uint32_t timeout_ms, size_t *transferred
+);
 
 /**
  * @brief Starts an asynchronous transmit operation in IRQ or DMA mode.
@@ -220,7 +225,8 @@ PalUartStatus PAL_UART_Port_StartTx(void *port_context, PalUartAsyncMode mode,
  * @param[in] port_context Valid platform context obtained from a mapped device.
  * @param[in] mode Requested asynchronous transfer mode.
  * @param[out] data Writable buffer with space for length bytes; remains valid until completion.
- * @param[in] length Number of bytes required to complete the receive request; greater than zero.
+ * @param[in] length Required byte count, or buffer capacity if to_idle; greater than zero.
+ * @param[in] to_idle Whether IDLE after receiving data may complete the request early.
  * @pre PAL has performed common argument, binding, availability, direction and idle checks.
  * @retval PAL_UART_STATUS_OK The request was accepted; it may already have completed.
  * @retval PAL_UART_STATUS_UNSUPPORTED The mode, resources or platform constraints are unsupported.
@@ -231,8 +237,13 @@ PalUartStatus PAL_UART_Port_StartTx(void *port_context, PalUartAsyncMode mode,
  * user code. The callback may execute in interrupt context or before this call returns.
  * DMA buffers must satisfy platform memory, alignment and cache requirements.
  */
+/* RX to idle is one-shot: full capacity or IDLE after data completes the request
+ * with its actual count. Ignore progress-only events such as DMA half-transfer;
+ * do not report them as completion. IDLE is not RX_TIMEOUT. No receive timeout
+ * is configured here. Unsupported idle reception must be rejected before
+ * starting hardware or consuming data. Circular DMA is outside this contract. */
 PalUartStatus PAL_UART_Port_StartRx(void *port_context, PalUartAsyncMode mode,
-                                  uint8_t *data, size_t length);
+                                  uint8_t *data, size_t length, bool to_idle);
 
 /**
  * @brief Requests cancellation of one outstanding asynchronous transfer direction.
