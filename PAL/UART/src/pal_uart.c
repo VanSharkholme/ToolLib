@@ -120,7 +120,7 @@ PalUartStatus PAL_UART_Detach(PalUartId id)
  * @note This function checks if the device is bound, ready, and supports the requested transfer direction.
  * It also checks if there are any active transfers in the requested direction.
  */
-static PalUartStatus PAL_UART_PrepareTransfer(
+static PalUartStatus PAL_UART_Find_Check_Device(
     PalUartId id, PalUartDirection direction,
     PalUartDevice** out
 )
@@ -142,7 +142,7 @@ PalUartStatus PAL_UART_Write(
     if (transferred != NULL) *transferred = 0;
     if (data == NULL || length == 0 || transferred == NULL) return PAL_UART_STATUS_INVALID_ARGUMENT;
     PalUartDevice* device;
-    PalUartStatus status = PAL_UART_PrepareTransfer(id, PAL_UART_DIR_TX, &device);
+    PalUartStatus status = PAL_UART_Find_Check_Device(id, PAL_UART_DIR_TX, &device);
     if (status != PAL_UART_STATUS_OK) return status;
     return PAL_UART_Port_Write(device->port_context, data, length, timeout_ms, transferred);
 }
@@ -155,7 +155,7 @@ PalUartStatus PAL_UART_Read(
     if (transferred != NULL) *transferred = 0;
     if (data == NULL || length == 0 || transferred == NULL) return PAL_UART_STATUS_INVALID_ARGUMENT;
     PalUartDevice* device;
-    PalUartStatus status = PAL_UART_PrepareTransfer(id, PAL_UART_DIR_RX, &device);
+    PalUartStatus status = PAL_UART_Find_Check_Device(id, PAL_UART_DIR_RX, &device);
     if (status != PAL_UART_STATUS_OK) return status;
     return PAL_UART_Port_Read(device->port_context, to_idle, data, length, timeout_ms, transferred);
 }
@@ -165,12 +165,11 @@ PalUartStatus PAL_UART_Read(
  * @param mode Async transfer mode, either PAL_UART_ASYNC_IRQ or PAL_UART_ASYNC_DMA.
  * @param data The data to be transferred.
  * @param length The length of the data to be transferred.
- * @param completion The completion callback function.
  * @return PAL_UART_STATUS_OK if the parameters are valid, otherwise an error code.
  */
 static PalUartStatus PAL_UART_CheckAsyncParam(
     PalUartAsyncMode mode, const void* data,
-    size_t length, PalUartCompletion completion
+    size_t length
 )
 {
     if (data == NULL || length == 0 ||
@@ -185,10 +184,10 @@ PalUartStatus PAL_UART_StartTx(
     PalUartCompletion completion, void* context
 )
 {
-    PalUartStatus status = PAL_UART_CheckAsyncParam(mode, data, length, completion);
+    PalUartStatus status = PAL_UART_CheckAsyncParam(mode, data, length);
     if (status != PAL_UART_STATUS_OK) return status;
     PalUartDevice* device;
-    status = PAL_UART_PrepareTransfer(id, PAL_UART_DIR_TX, &device);
+    status = PAL_UART_Find_Check_Device(id, PAL_UART_DIR_TX, &device);
     if (status != PAL_UART_STATUS_OK) return status;
     device->tx.state = PAL_UART_ASYNC_ACTIVE;
     device->tx.mode = mode;
@@ -209,10 +208,10 @@ PalUartStatus PAL_UART_StartRx(
     bool to_idle, PalUartCompletion completion, void* context
 )
 {
-    PalUartStatus status = PAL_UART_CheckAsyncParam(mode, data, length, completion);
+    PalUartStatus status = PAL_UART_CheckAsyncParam(mode, data, length);
     if (status != PAL_UART_STATUS_OK) return status;
     PalUartDevice* device;
-    status = PAL_UART_PrepareTransfer(id, PAL_UART_DIR_RX, &device);
+    status = PAL_UART_Find_Check_Device(id, PAL_UART_DIR_RX, &device);
     if (status != PAL_UART_STATUS_OK) return status;
     device->rx.state = PAL_UART_ASYNC_ACTIVE;
     device->rx.mode = mode;

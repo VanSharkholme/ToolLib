@@ -87,12 +87,19 @@ not part of this interface. Ports without idle reception return `UNSUPPORTED`.
 ## Builds and tests
 
 The header-only `pal_uart_contract` target is shared by PAL, Ports and BSPs;
-Ports do not link back to PAL's implementation. The host Port is selected by
-default for native builds. Cross builds default to `TOOLLIB_UART_PORT=none`
-until the application supplies a hardware Port target. The STM32H5 implementation
-in `Port/stm32/UART` provides blocking TX/RX, IRQ/normal-DMA transfers and cancel.
+Ports do not link back to PAL's implementation. Platform selection is managed by
+this module's `CMakeLists.txt`. The host Port in `port/host` is selected by
+default for native builds (`TOOLLIB_UART_PORT=host`). Cross builds default to
+`TOOLLIB_UART_PORT=none` until the application supplies a hardware Port target.
+The STM32H5 implementation
+in `port/stm32h5` is selected with `TOOLLIB_UART_PORT=stm32` and links to the
+application-provided `stm32cubemx` and `bsp` targets. It provides blocking TX/RX,
+IRQ/normal-DMA transfers and cancel.
 It selects the corresponding HAL ReceiveToIdle operation when `to_idle=true`.
 Board resources and UART/DMA interrupt routing remain application responsibilities.
+
+Unit tests live in `tests` and are enabled when `BUILD_TESTING` is on, the host
+Port is selected and the build is not cross-compiling.
 
 The host fake keeps simulated hardware state separate from PAL state and does
 not wait in real time. It has no IDLE event model: both receive APIs reject
