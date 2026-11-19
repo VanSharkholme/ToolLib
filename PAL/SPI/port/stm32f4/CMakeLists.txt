@@ -1,0 +1,6 @@
+if (NOT TARGET pal_spi_port)
+add_library(pal_spi_port STATIC)
+target_sources(pal_spi_port PRIVATE pal_spi_stm32.c)
+target_include_directories(pal_spi_port PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(pal_spi_port PUBLIC pal_spi_contract stm32cubemx bsp)
+endif ()
