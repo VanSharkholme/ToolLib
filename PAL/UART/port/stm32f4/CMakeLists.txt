@@ -1,0 +1,6 @@
+if (NOT TARGET pal_uart_port)
+add_library(pal_uart_port STATIC)
+target_sources(pal_uart_port PRIVATE pal_uart_stm32.c)
+target_include_directories(pal_uart_port PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(pal_uart_port PUBLIC pal_uart_contract stm32cubemx bsp)
+endif ()
