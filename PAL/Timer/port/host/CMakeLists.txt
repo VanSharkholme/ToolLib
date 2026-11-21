@@ -1,0 +1,3 @@
+add_library(pal_timer_port STATIC pal_timer_host.c)
+target_include_directories(pal_timer_port PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(pal_timer_port PUBLIC pal_timer_contract)

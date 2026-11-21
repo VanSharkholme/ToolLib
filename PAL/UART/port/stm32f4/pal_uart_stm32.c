@@ -1,5 +1,6 @@
 #include "pal_uart_port.h"
 #include "bsp_uart.h"
+#include "usart.h"
 #include "pal_uart_stm32.h"
 
 /* PAL owns the request lifecycle; the Port tracks hardware cleanup.
@@ -27,7 +28,23 @@ typedef struct
 } Stm32Uart;
 
 /* PAL owns pal.state. This table only binds physical resources and storage. */
-static Stm32Uart devices[BSP_UART_NUM];
+static Stm32Uart devices[BSP_UART_NUM] = {
+    [PAL_UART1] = {
+        .pal_device.port_context = &devices[PAL_UART1],
+        .id = PAL_UART1,
+        .huart = &huart1,
+    },
+    [PAL_UART2] = {
+        .pal_device.port_context = &devices[PAL_UART2],
+        .id = PAL_UART2,
+        .huart = &huart2,
+    },
+    [PAL_UART3] = {
+        .pal_device.port_context = &devices[PAL_UART3],
+        .id = PAL_UART3,
+        .huart = &huart6,
+    },
+};
 
 
 static Stm32Uart* PAL_UART_STM32_FindByHalHandle(UART_HandleTypeDef* huart)
@@ -304,17 +321,8 @@ static PalUartStatus PAL_UART_STM32_Convert_Status(HAL_StatusTypeDef status)
 
 PalUartDevice* PAL_UART_Port_Find(PalUartId id)
 {
-    if ((unsigned)id >= BSP_UART_NUM) return NULL;
-    Stm32Uart* device = &devices[id];
-    if (!device->huart)
-    {
-        UART_HandleTypeDef* handle = BSP_UART_Get_Handle(id);
-        if (!handle) return NULL;
-        device->id = id;
-        device->pal_device.port_context = device;
-        device->huart = handle;
-    }
-    return &device->pal_device;
+    if ((unsigned)id >= BSP_UART_NUM || devices[id].huart == NULL) return NULL;
+    return &devices[id].pal_device;
 }
 
 PalUartStatus PAL_UART_Port_CheckIdle(void* port_context, PalUartDirection directions)
@@ -371,7 +379,6 @@ PalUartStatus PAL_UART_Port_AttachInitialized(void* port_context, PalUartConfig*
         return PAL_UART_STATUS_PORT_ERROR;
     if ((huart->Instance->CR1 & USART_CR1_UE) == 0)
         return PAL_UART_STATUS_NOT_INITIALIZED;
-    if (huart->Instance != BSP_UART_Get_Instance(device->id)) return PAL_UART_STATUS_PORT_ERROR;
     if ((huart->Instance->CR2 & (USART_CR2_LINEN | USART_CR2_CLKEN)) != 0 ||
         (huart->Instance->CR3 & (USART_CR3_SCEN | USART_CR3_HDSEL | USART_CR3_IREN)) != 0)
         return PAL_UART_STATUS_UNSUPPORTED;

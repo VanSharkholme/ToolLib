@@ -1,0 +1,7 @@
+#ifndef TOOLLIB_EXAMPLE_BSP_GPIO_H
+#define TOOLLIB_EXAMPLE_BSP_GPIO_H
+
+enum { BSP_GPIO_LED, BSP_GPIO_BUTTON };
+#define BSP_GPIO_COUNT 2u
+
+#endif

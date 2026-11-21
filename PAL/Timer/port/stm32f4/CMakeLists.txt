@@ -1,0 +1,5 @@
+if(NOT TARGET pal_timer_port)
+    add_library(pal_timer_port STATIC pal_timer_stm32.c)
+    target_include_directories(pal_timer_port PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(pal_timer_port PUBLIC pal_timer_contract stm32cubemx PRIVATE bsp)
+endif()

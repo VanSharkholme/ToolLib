@@ -1,0 +1,5 @@
+if(NOT TARGET pal_gpio_port)
+    add_library(pal_gpio_port STATIC pal_gpio_stm32.c)
+    target_include_directories(pal_gpio_port PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(pal_gpio_port PUBLIC pal_gpio_contract stm32cubemx bsp)
+endif()

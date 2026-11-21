@@ -1,6 +1,7 @@
 #include "pal_spi_port.h"
-#include <string.h>
 #include "bsp_spi.h"
+#include <string.h>
+#include "spi.h"
 #include "pal_spi_stm32.h"
 
 #define PAL_SPI_STM32_INVALID_BAUD_PRESCALER 0xFFFFFFFFU
@@ -28,7 +29,19 @@ typedef struct
     bool dispatching;
 } Stm32Spi;
 
-static Stm32Spi devices[BSP_SPI_NUM];
+static Stm32Spi devices[BSP_SPI_NUM] =
+{
+    [PAL_SPI1] = {
+        .pal_device.port_context = &devices[PAL_SPI1],
+        .id = PAL_SPI1,
+        .hspi = &hspi2,
+    },
+    [PAL_SPI2] = {
+        .pal_device.port_context = &devices[PAL_SPI2],
+        .id = PAL_SPI2,
+        .hspi = &hspi3,
+    },
+};
 
 
 static uint32_t KernelClock(const SPI_TypeDef* instance)
@@ -168,24 +181,14 @@ static PalSpiStatus PAL_SPI_STM32_Convert_Status(HAL_StatusTypeDef hal_status)
 
 PalSpiDevice* PAL_SPI_Port_Find(PalSpiId id)
 {
-    if ((unsigned)id >= BSP_SPI_NUM) return NULL;
-    Stm32Spi* device = &devices[id];
-    if (!device->hspi)
-    {
-        SPI_HandleTypeDef* handle = BSP_SPI_Get_Handle(id);
-        if (!handle) return NULL;
-        device->id = id;
-        device->pal_device.port_context = device;
-        device->hspi = handle;
-    }
-    return &device->pal_device;
+    if ((unsigned)id >= BSP_SPI_NUM || devices[id].hspi == NULL) return NULL;
+    return &devices[id].pal_device;
 }
 
 PalSpiStatus PAL_SPI_Port_CheckIdle(void* port_context)
 {
     const Stm32Spi* device = (Stm32Spi*)port_context;
     const SPI_HandleTypeDef* hspi = device->hspi;
-    if (!device->pal_device.state.ready && hspi->State == HAL_SPI_STATE_RESET) return PAL_SPI_STATUS_OK;
     if (hspi->State != HAL_SPI_STATE_READY) return PAL_SPI_STATUS_BUSY;
     return PAL_SPI_STATUS_OK;
 }
