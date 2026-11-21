@@ -25,8 +25,8 @@ static Log_Backend backends[2];
 static Log_BackendPtr table[2];
 static char record[LOG_MAX_SINGLE_LOG_LENGTH];
 
-uint32_t Lock_IRQ_Disable(void) { return 0; }
-void Lock_IRQ_Enable(uint32_t previous) { (void)previous; }
+uint32_t Lock_IRQ_Disable(const void *context) { (void)context; return 0; }
+void Lock_IRQ_Enable(const void *context, uint32_t previous) { (void)context; (void)previous; }
 void log_port_notify(void) {}
 
 static Log_Backend_Status fake_init(void *completion, void *context)

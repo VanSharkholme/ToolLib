@@ -40,13 +40,15 @@ static Log_Status deinit_during_tx, init_during_tx;
 
 /* Check that shared-state critical sections restore their previous state and
  * that backend calls are made outside the lock. This is not an SMP simulation. */
-uint32_t Lock_IRQ_Disable(void)
+uint32_t Lock_IRQ_Disable(const void *context)
 {
+    (void)context;
     return irq_depth++;
 }
 
-void Lock_IRQ_Enable(uint32_t previous)
+void Lock_IRQ_Enable(const void *context, uint32_t previous)
 {
+    (void)context;
     TEST_ASSERT_EQUAL_UINT(previous + 1, irq_depth);
     irq_depth = previous;
 }

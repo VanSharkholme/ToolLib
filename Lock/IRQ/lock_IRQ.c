@@ -4,32 +4,32 @@
 
 #include "lock_IRQ.h"
 
-__weak uint32_t Lock_IRQ_Disable(void)
+__weak uint32_t Lock_IRQ_Disable(const void *context)
 {
+    UNUSED(context);
     return 0;
 }
 
-__weak void Lock_IRQ_Enable(uint32_t level)
+__weak void Lock_IRQ_Enable(const void *context, uint32_t level)
 {
+    UNUSED(context);
     UNUSED(level);
 }
 
 static inline uintptr_t Lock_IRQ_Acquire(Lock *lock)
 {
-    return Lock_IRQ_Disable();
+    return Lock_IRQ_Disable(lock->context);
 }
 
 static inline void Lock_IRQ_Release(Lock *lock, uintptr_t status)
 {
-    UNUSED(lock);
-    Lock_IRQ_Enable(status);
+    Lock_IRQ_Enable(lock->context, (uint32_t)status);
 }
 
 void Lock_IRQ_Init(Lock *lock, void *context)
 {
-    UNUSED(context);
     lock->type = Lock_IRQ;
     lock->acquire = Lock_IRQ_Acquire;
     lock->release = Lock_IRQ_Release;
-    lock->context = NULL;
+    lock->context = context;
 }

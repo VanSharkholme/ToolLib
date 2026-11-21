@@ -32,16 +32,18 @@ The library calls the pair around `AllocateBlock`, `WriteBlock`, `ReadBlock`, an
 For a single-core Cortex-M system, `Lock_IRQ` calls the platform hooks `Lock_IRQ_Disable` and `Lock_IRQ_Enable`. Their current weak defaults do nothing, so the application must provide working replacements before using this lock for concurrent access. An implementation that saves PRIMASK, disables interrupts, and restores exactly the saved value can look like this with CMSIS names:
 
 ```c
-uint32_t Lock_IRQ_Disable(void)
+uint32_t Lock_IRQ_Disable(const void *context)
 {
+    (void)context;
     uint32_t previous = __get_PRIMASK();
     __disable_irq();
     __DMB();
     return previous;
 }
 
-void Lock_IRQ_Enable(uint32_t previous)
+void Lock_IRQ_Enable(const void *context, uint32_t previous)
 {
+    (void)context;
     __DMB();
     __set_PRIMASK(previous);
 }
