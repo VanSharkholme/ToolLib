@@ -153,6 +153,27 @@ BufferStatus RingBlockBuffer_Init(
     return BUFFER_OK;
 }
 
+/** @see RingBlockBuffer_Reset() for the public reset contract. */
+void RingBlockBuffer_Reset(RingBlockBuffer* rbb)
+{
+    if (rbb == NULL)
+    {
+        return;
+    }
+    uintptr_t state = RingBlockBuffer_Enter(rbb);
+    SLinkedList_Init(&rbb->free_list);
+    SLinkedList_Init(&rbb->used_list);
+    rbb->tail = &rbb->used_list;
+    for (size_t i = 0; i < rbb->max_block_num; i++)
+    {
+        rbb->block_pool[i].data = NULL;
+        rbb->block_pool[i].size = 0;
+        rbb->block_pool[i].status = BLOCK_FREE;
+        SLinkedList_InsertAt(&rbb->free_list, &rbb->block_pool[i].list_node);
+    }
+    RingBlockBuffer_Exit(rbb, state);
+}
+
 /** @see RingBlockBuffer_AllocateBlock() for reservation and ownership requirements. */
 BufferStatus RingBlockBuffer_AllocateBlock(RingBlockBuffer* rbb, size_t block_size, Block** allocated_block)
 {

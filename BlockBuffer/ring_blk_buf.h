@@ -47,9 +47,9 @@ typedef enum
  */
 typedef struct
 {
-    uint8_t* data;            /**< Payload address, or NULL when free. */
-    size_t size;             /**< Reserved capacity before publication; readable length afterward, in bytes. */
-    BlockStatus status;      /**< Current ownership and publication state. */
+    uint8_t* data;             /**< Payload address, or NULL when free. */
+    size_t size;               /**< Reserved capacity before publication; readable length afterward, in bytes. */
+    BlockStatus status;        /**< Current ownership and publication state. */
     SLinkedListNode list_node; /**< Intrusive node in either the free or used list. */
 } Block;
 
@@ -61,14 +61,14 @@ typedef struct
  */
 typedef struct RingBlockBuffer
 {
-    uint8_t* buffer;          /**< Start of caller-owned payload storage. */
-    Block* block_pool;        /**< Caller-owned array of block descriptors. */
-    size_t buffer_size;       /**< Payload storage capacity in bytes. */
-    size_t max_block_num;     /**< Number of descriptors in block_pool. */
+    uint8_t* buffer;           /**< Start of caller-owned payload storage. */
+    Block* block_pool;         /**< Caller-owned array of block descriptors. */
+    size_t buffer_size;        /**< Payload storage capacity in bytes. */
+    size_t max_block_num;      /**< Number of descriptors in block_pool. */
     SLinkedListNode free_list; /**< Sentinel for descriptors available for allocation. */
     SLinkedListNode used_list; /**< Sentinel for active blocks in allocation order. */
-    SLinkedListNode* tail;    /**< Last used node, or &used_list when the used list is empty. */
-    Lock lock;               /**< Copied lock configuration; absent callbacks disable internal locking. */
+    SLinkedListNode* tail;     /**< Last used node, or &used_list when the used list is empty. */
+    Lock lock;                 /**< Copied lock configuration; absent callbacks disable internal locking. */
 } RingBlockBuffer;
 
 /**
@@ -100,6 +100,18 @@ BufferStatus RingBlockBuffer_Init(
     RingBlockBuffer* rbb, uint8_t* buffer, size_t buffer_size, Block* block_pool, size_t max_block_num,
     const Lock* lock
 );
+/**
+ * @brief Reset a ring block buffer to empty, discarding all reservations.
+ * @note The caller must ensure no producer or consumer is accessing the buffer
+ *       or any of its blocks, including payload bytes. All old block pointers
+ *       must be considered invalid after this call. The buffer is ready for new
+ *       allocations and publications.
+ * @param[in] rbb Initialized buffer instance.
+ * @pre A non-NULL rbb must have been successfully initialized.
+ * @note Reset does not acquire the lock or clear payload bytes. It does not
+ *       change the lock configuration or any other member of the instance.
+ */
+void RingBlockBuffer_Reset(RingBlockBuffer* rbb);
 /**
  * @brief Reserve a contiguous payload region and give it to a producer.
  * @param[in,out] rbb Initialized buffer instance.

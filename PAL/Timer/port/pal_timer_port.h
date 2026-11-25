@@ -34,6 +34,7 @@ void PAL_Timer_Port_Start(void *context, bool clear_counter, bool notify);
 void PAL_Timer_Port_Stop(void *context);
 /* Validate hardware capabilities before disabling the channel. */
 PalTimerStatus PAL_Timer_Port_ConfigureChannel(void *context, PalTimerChannel channel, PalTimerChannelConfig config);
+void PAL_Timer_Port_SetChannelInterrupt(void *context, PalTimerChannel channel, bool notify);
 void PAL_Timer_Port_EnableChannel(void *context, PalTimerChannel channel, bool enable, bool notify);
 
 PalTimerStatus PAL_Timer_Port_SetAutoReload(PalTimerId id, uint32_t arr, PalTimerApply apply);

@@ -7,6 +7,7 @@ typedef struct {
     uint32_t ccr;
     PalTimerCaptureEdge edge;
     bool pending;
+    bool notify;
 } HostChannel;
 
 typedef struct {
@@ -202,14 +203,20 @@ PalTimerStatus PAL_Timer_Port_ConfigureChannel(void *context, PalTimerChannel ch
         channel->ccr = config.compare_value & timer->width_mask;
     }
     channel->pending = false;
+    channel->notify = false;
     return PAL_TIMER_STATUS_OK;
+}
+
+void PAL_Timer_Port_SetChannelInterrupt(void *context, PalTimerChannel ch, bool notify)
+{
+    HostTimer *timer = context;
+    timer->channels[ch].notify = notify;
 }
 
 void PAL_Timer_Port_EnableChannel(void *context, PalTimerChannel ch, bool enable, bool notify)
 {
     HostTimer *timer = context;
-    (void)enable;
-    (void)notify;
+    timer->channels[ch].notify = enable && notify;
     timer->channels[ch].pending = false;
 }
 
@@ -252,7 +259,7 @@ static void dispatch_channels(HostTimer *timer, PalTimerId id)
     for (unsigned i = 0; i < PAL_TIMER_CHANNEL_COUNT; ++i) {
         HostChannel *channel = &timer->channels[i];
         const PalTimerChannelState *state = &timer->device.channels[i];
-        if (channel->pending && state->callback) {
+        if (channel->pending && channel->notify && state->callback) {
             channel->pending = false;
             state->callback(id, (PalTimerChannel)i, state->context);
         }
@@ -278,7 +285,7 @@ PalTimerStatus PAL_Timer_Host_Advance(PalTimerId id, uint64_t ticks)
         uint64_t step = ticks < wrap ? ticks : wrap;
         for (unsigned i = 0; i < PAL_TIMER_CHANNEL_COUNT; ++i) {
             const HostChannel *channel = &timer->channels[i];
-            if (!channel->edge && timer->device.channels[i].callback && channel->ccr > timer->counter) {
+            if (!channel->edge && timer->device.channels[i].enabled && channel->ccr > timer->counter) {
                 uint32_t distance = channel->ccr - timer->counter;
                 if (distance < step) step = distance;
             }

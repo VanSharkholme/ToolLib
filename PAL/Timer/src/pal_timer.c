@@ -155,15 +155,32 @@ PalTimerStatus PAL_Timer_ConfigureChannel(PalTimerId id, PalTimerChannel ch, Pal
     return status;
 }
 
-PalTimerStatus PAL_Timer_StartChannel(PalTimerId id, PalTimerChannel ch, PalTimerChannelCallback callback, void *context)
+PalTimerStatus PAL_Timer_SetChannelCallback(PalTimerId id, PalTimerChannel ch, PalTimerChannelCallback callback, void *context)
 {
     PalTimerDevice *device;
     PalTimerStatus status = lookup_bound(id, &device);
     if (status != PAL_TIMER_STATUS_OK) return status;
     if ((unsigned)ch >= PAL_TIMER_CHANNEL_COUNT) return PAL_TIMER_STATUS_INVALID_ARGUMENT;
     uint32_t key = PAL_Timer_Port_EnterCritical();
-    device->channels[ch] = (PalTimerChannelState){ .callback = callback, .context = context, .enabled = true };
-    PAL_Timer_Port_EnableChannel(device->port_context, ch, true, callback != NULL);
+    PalTimerChannelState *state = &device->channels[ch];
+    bool change_interrupt = state->enabled && ((state->callback == NULL) != (callback == NULL));
+    state->callback = callback;
+    state->context = context;
+    if (change_interrupt) PAL_Timer_Port_SetChannelInterrupt(device->port_context, ch, callback != NULL);
+    PAL_Timer_Port_ExitCritical(key);
+    return PAL_TIMER_STATUS_OK;
+}
+
+PalTimerStatus PAL_Timer_StartChannel(PalTimerId id, PalTimerChannel ch)
+{
+    PalTimerDevice *device;
+    PalTimerStatus status = lookup_bound(id, &device);
+    if (status != PAL_TIMER_STATUS_OK) return status;
+    if ((unsigned)ch >= PAL_TIMER_CHANNEL_COUNT) return PAL_TIMER_STATUS_INVALID_ARGUMENT;
+    uint32_t key = PAL_Timer_Port_EnterCritical();
+    PalTimerChannelState *state = &device->channels[ch];
+    state->enabled = true;
+    PAL_Timer_Port_EnableChannel(device->port_context, ch, true, state->callback != NULL);
     PAL_Timer_Port_ExitCritical(key);
     return PAL_TIMER_STATUS_OK;
 }
@@ -176,7 +193,7 @@ PalTimerStatus PAL_Timer_StopChannel(PalTimerId id, PalTimerChannel ch)
     if ((unsigned)ch >= PAL_TIMER_CHANNEL_COUNT) return PAL_TIMER_STATUS_INVALID_ARGUMENT;
     uint32_t key = PAL_Timer_Port_EnterCritical();
     PAL_Timer_Port_EnableChannel(device->port_context, ch, false, false);
-    device->channels[ch] = (PalTimerChannelState){0};
+    device->channels[ch].enabled = false;
     PAL_Timer_Port_ExitCritical(key);
     return PAL_TIMER_STATUS_OK;
 }

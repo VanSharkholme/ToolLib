@@ -13,11 +13,11 @@ PalTimerStatus BSP_TIMER_ArmFromTim2(PalTimerUpdateCallback callback, void *cont
     if (status != PAL_TIMER_STATUS_OK) return status;
     status = PAL_Timer_SetOnePulse(BSP_TIMER_ONE_SHOT, true);
     if (status != PAL_TIMER_STATUS_OK) return status;
-    status = PAL_Timer_StartChannel(BSP_TIMER_CAPTURE, PAL_TIMER_CHANNEL_1, NULL, NULL);
+    status = PAL_Timer_StartChannel(BSP_TIMER_CAPTURE, PAL_TIMER_CHANNEL_1);
     if (status != PAL_TIMER_STATUS_OK) return status;
-    status = PAL_Timer_Start(BSP_TIMER_ONE_SHOT, PAL_TIMER_CLEAR_COUNTER, callback, context);
+    status = PAL_Timer_Start(BSP_TIMER_ONE_SHOT, true, callback, context);
     if (status == PAL_TIMER_STATUS_OK) {
-        status = PAL_Timer_Start(BSP_TIMER_CAPTURE, PAL_TIMER_CLEAR_COUNTER, NULL, NULL);
+        status = PAL_Timer_Start(BSP_TIMER_CAPTURE, true, NULL, NULL);
         if (status == PAL_TIMER_STATUS_OK) return status;
         PAL_Timer_Stop(BSP_TIMER_ONE_SHOT);
     }

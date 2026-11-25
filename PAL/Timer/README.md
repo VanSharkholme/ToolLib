@@ -29,8 +29,12 @@ channels can still latch the frozen count.
 
 ConfigureChannel takes a PalTimerChannelConfig by value. Input capture uses
 its capture_edge, and output compare loads its initial compare_value into CCR.
-The configured channel starts disabled. StartChannel
-enables it with an optional callback. StopChannel preserves the configuration.
+Successful configuration stops the channel and clears its callback.
+SetChannelCallback saves a callback and context together. StartChannel(id, ch)
+uses the saved callback, and StopChannel retains it. On an enabled channel,
+SetChannelCallback can change the recipient or mask notifications with NULL
+while preserving pending events. After notifications resume, the new callback
+can receive an event that was already pending.
 GetCapture reads the latest CCR, which is meaningful after the first edge.
 Reading CCR acknowledges a pending capture on F4. Dual-edge mode captures both
 polarities. IRQ flags can coalesce. SetCompare sets a persistent timing-only

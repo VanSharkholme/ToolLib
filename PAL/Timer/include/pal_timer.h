@@ -34,10 +34,13 @@ PalTimerStatus PAL_Timer_Stop(PalTimerId id);
 PalTimerStatus PAL_Timer_ConfigureMasterTrigger(PalTimerId id, PalTimerMasterTriggerOutput source);
 PalTimerStatus PAL_Timer_ConfigureSlave(PalTimerId id, PalTimerSlaveMode mode, PalTimerTriggerId trigger);
 
-/* Successful configuration leaves just this channel stopped. Configure before
- * StartChannel. A NULL callback enables polling without a channel interrupt. */
+/* Successful configuration stops this channel and clears its saved callback. */
 PalTimerStatus PAL_Timer_ConfigureChannel(PalTimerId id, PalTimerChannel channel, PalTimerChannelConfig config);
-PalTimerStatus PAL_Timer_StartChannel(PalTimerId id, PalTimerChannel channel, PalTimerChannelCallback callback, void *context);
+/* Save callback and context together. On an enabled channel, NULL masks the
+ * channel interrupt. A pending event may be delivered to the replacement. */
+PalTimerStatus PAL_Timer_SetChannelCallback(PalTimerId id, PalTimerChannel channel, PalTimerChannelCallback callback, void *context);
+/* Start uses the saved callback. Stop retains it for the next start. */
+PalTimerStatus PAL_Timer_StartChannel(PalTimerId id, PalTimerChannel channel);
 PalTimerStatus PAL_Timer_StopChannel(PalTimerId id, PalTimerChannel channel);
 
 /* Valid configured channel required. Capture reads the latest hardware latch

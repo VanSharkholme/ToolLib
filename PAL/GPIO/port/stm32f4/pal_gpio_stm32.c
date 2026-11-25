@@ -1,13 +1,19 @@
 #include "pal_gpio_stm32.h"
 #include "pal_gpio_port.h"
 #include "bsp_gpio.h"
+#include "stm32f4xx.h"
 
 typedef struct {
     PalGpioCallback function;
     void *context;
 } Callback;
 
-static Callback callbacks[BSP_GPIO_COUNT];
+typedef struct {
+    GPIO_TypeDef *port;
+    uint16_t pin; /* Exactly one GPIO_PIN_n bit. */
+} PalGpioStm32Pin;
+
+static Callback callbacks[BSP_GPIO_NUM];
 
 static uint32_t enter_critical(void)
 {
@@ -18,8 +24,8 @@ static uint32_t enter_critical(void)
 
 static const PalGpioStm32Pin *find_pin(PalGpioId id)
 {
-    if (id >= BSP_GPIO_COUNT) return NULL;
-    const PalGpioStm32Pin *pin = &bsp_gpio_map[id];
+    if (id >= BSP_GPIO_NUM) return NULL;
+    const PalGpioStm32Pin *pin = (const PalGpioStm32Pin*)BSP_GPIO_GetMap(id);
     if (pin->port == NULL || pin->pin == 0u || (pin->pin & (pin->pin - 1u)) != 0u) return NULL;
     return pin;
 }
@@ -387,8 +393,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t mask)
 {
     uint32_t saved = enter_critical();
     __HAL_RCC_SYSCFG_CLK_ENABLE();
-    for (size_t id = 0; id < BSP_GPIO_COUNT; ++id) {
-        const PalGpioStm32Pin *pin = &bsp_gpio_map[id];
+    for (size_t id = 0; id < BSP_GPIO_NUM; ++id) {
+    const PalGpioStm32Pin *pin = (const PalGpioStm32Pin*)BSP_GPIO_GetMap(id);
         if (pin->pin == mask && interrupt_enabled(pin)) {
             Callback callback = callbacks[id];
             __set_PRIMASK(saved);

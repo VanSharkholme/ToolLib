@@ -63,9 +63,11 @@ static void test_independent(void)
     OK(PAL_Timer_ConfigureChannel(id, oc, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_OUTPUT_COMPARE, .compare_value = 3
     }));
-    OK(PAL_Timer_StartChannel(id, ic, capture, &sample));
-    OK(PAL_Timer_StartChannel(id, oc, match, &matches));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, update, &updates));
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &sample));
+    OK(PAL_Timer_StartChannel(id, ic));
+    OK(PAL_Timer_SetChannelCallback(id, oc, match, &matches));
+    OK(PAL_Timer_StartChannel(id, oc));
+    OK(PAL_Timer_Start(id, true, update, &updates));
     advance(3);
     OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
     OK(PAL_Timer_Stop(id));
@@ -73,7 +75,7 @@ static void test_independent(void)
     assert_counter(id, 3);
     OK(PAL_Timer_Host_DispatchCaptures(id));
     TEST_ASSERT_EQUAL_UINT32(3, sample);
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, update, &updates));
+    OK(PAL_Timer_Start(id, false, update, &updates));
     advance(10);
     TEST_ASSERT_EQUAL_UINT(2, matches);
     TEST_ASSERT_EQUAL_UINT(1, updates);
@@ -88,7 +90,7 @@ static void test_independent(void)
     TEST_ASSERT_EQUAL_UINT(3, matches);
     TEST_ASSERT_EQUAL_UINT(3, updates);
     OK(PAL_Timer_Stop(id));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     assert_counter(id, 0);
 }
 
@@ -96,7 +98,7 @@ static void test_preload(void)
 {
     OK(PAL_Timer_Init(id));
     OK(PAL_Timer_SetAutoReload(id, 9, PAL_TIMER_IMMEDIATE));
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, update, &updates));
+    OK(PAL_Timer_Start(id, false, update, &updates));
     advance(4);
     OK(PAL_Timer_SetTickFrequency(id, 2000000));
     OK(PAL_Timer_SetAutoReload(id, 5, PAL_TIMER_ON_UPDATE));
@@ -118,7 +120,7 @@ static void test_preload(void)
     TEST_ASSERT_EQUAL_UINT(2, updates);
     OK(PAL_Timer_Stop(id));
     OK(PAL_Timer_SetTickFrequency(id, 1000000));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     TEST_ASSERT_EQUAL_UINT32(2000000, PAL_Timer_Host_ActiveFrequency(id));
     advance(4);
     TEST_ASSERT_EQUAL_UINT32(1000000, PAL_Timer_Host_ActiveFrequency(id));
@@ -131,7 +133,7 @@ static void test_trigger(void)
     OK(PAL_Timer_ConfigureSlave(id, PAL_TIMER_TRIGGER_START, PAL_TIMER_ITR1));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_ConfigureSlave(id, PAL_TIMER_TRIGGER_RESET, 99));
     OK(PAL_Timer_SetOnePulse(id, true));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     advance(4);
     assert_counter(id, 0);
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_BUSY, PAL_Timer_ConfigureSlave(id, PAL_TIMER_SLAVE_DISABLED, 0));
@@ -154,7 +156,7 @@ static void test_trigger(void)
     assert_counter(id, 2);
     OK(PAL_Timer_ConfigureSlave(id, PAL_TIMER_TRIGGER_RESET, PAL_TIMER_ITR2));
     OK(PAL_Timer_SetOnePulse(id, false));
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, update, &updates));
+    OK(PAL_Timer_Start(id, false, update, &updates));
     advance(3);
     PAL_Timer_Host_Trigger(id, PAL_TIMER_ITR1);
     assert_counter(id, 5);
@@ -165,7 +167,7 @@ static void test_trigger(void)
     TEST_ASSERT_EQUAL_UINT(1, updates);
     OK(PAL_Timer_Stop(id));
     OK(PAL_Timer_ConfigureSlave(id, PAL_TIMER_SLAVE_DISABLED, (PalTimerTriggerId)99));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     advance(3);
     assert_counter(id, 3);
 }
@@ -176,7 +178,7 @@ static void test_capture(void)
     OK(PAL_Timer_ConfigureChannel(id, ic, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = PAL_TIMER_CAPTURE_BOTH
     }));
-    OK(PAL_Timer_StartChannel(id, ic, NULL, NULL));
+    OK(PAL_Timer_StartChannel(id, ic));
     OK(PAL_Timer_SetCounter(id, 20));
     OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_FALLING));
     assert_capture(id, ic, 20);
@@ -186,7 +188,8 @@ static void test_capture(void)
     OK(PAL_Timer_ConfigureChannel(id, ic, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = PAL_TIMER_CAPTURE_FALLING
     }));
-    OK(PAL_Timer_StartChannel(id, ic, capture, &sample));
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &sample));
+    OK(PAL_Timer_StartChannel(id, ic));
     OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
     OK(PAL_Timer_Host_DispatchCaptures(id));
     TEST_ASSERT_EQUAL_UINT32(0, sample);
@@ -208,11 +211,11 @@ static void test_binding(void)
     OK(PAL_Timer_ConfigureChannel(wide, oc, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_OUTPUT_COMPARE, .compare_value = 0
     }));
-    OK(PAL_Timer_StartChannel(wide, oc, NULL, NULL));
+    OK(PAL_Timer_StartChannel(wide, oc));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_BUSY, PAL_Timer_Detach(wide));
     OK(PAL_Timer_StopChannel(wide, oc));
     OK(PAL_Timer_SetCounter(wide, UINT32_MAX - 1u));
-    OK(PAL_Timer_Start(wide, PAL_TIMER_KEEP_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(wide, false, NULL, NULL));
     OK(PAL_Timer_Host_Advance(wide, 2));
     assert_counter(wide, 0);
     OK(PAL_Timer_Stop(wide));
@@ -227,7 +230,7 @@ static void test_binding(void)
     OK(PAL_Timer_GetTimebase(id, &programmed));
     TEST_ASSERT_EQUAL_UINT32(UINT16_MAX, programmed.arr);
     OK(PAL_Timer_SetCounter(id, UINT16_MAX));
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, false, NULL, NULL));
     advance(1);
     assert_counter(id, 0);
     OK(PAL_Timer_Stop(id));
@@ -256,12 +259,13 @@ static void test_compare(void)
     OK(PAL_Timer_ConfigureChannel(id, oc, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_OUTPUT_COMPARE, .compare_value = 3
     }));
-    OK(PAL_Timer_StartChannel(id, oc, reschedule, &matches));
+    OK(PAL_Timer_SetChannelCallback(id, oc, reschedule, &matches));
+    OK(PAL_Timer_StartChannel(id, oc));
     PalTimerChannelConfig invalid = {.mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = 0};
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_ConfigureChannel(id, oc, invalid));
     invalid.mode = (PalTimerChannelMode)2;
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_ConfigureChannel(id, oc, invalid));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     advance(5);
     TEST_ASSERT_EQUAL_UINT(2, matches);
     advance(20);
@@ -279,12 +283,13 @@ static void test_id_bounds(void)
     OK(PAL_Timer_ConfigureChannel(id, oc, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_OUTPUT_COMPARE, .compare_value = 0
     }));
-    OK(PAL_Timer_StartChannel(id, oc, match, &matches));
+    OK(PAL_Timer_SetChannelCallback(id, oc, match, &matches));
+    OK(PAL_Timer_StartChannel(id, oc));
     OK(PAL_Timer_SetCompare(id, oc, 5));
     OK(PAL_Timer_ConfigureChannel(id, ic, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = PAL_TIMER_CAPTURE_RISING
     }));
-    OK(PAL_Timer_StartChannel(id, ic, NULL, NULL));
+    OK(PAL_Timer_StartChannel(id, ic));
     OK(PAL_Timer_SetCounter(id, 3));
     OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
 
@@ -298,14 +303,15 @@ static void test_id_bounds(void)
         TEST_ASSERT_EQUAL_UINT32(19, value);
         TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_GetCounter(bad, &value));
         TEST_ASSERT_EQUAL_UINT32(19, value);
-        TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_Start(bad, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+        TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_Start(bad, true, NULL, NULL));
         TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_Stop(bad));
-        TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_StartChannel(bad, ic, NULL, NULL));
+        TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_SetChannelCallback(bad, ic, NULL, NULL));
+        TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_StartChannel(bad, ic));
         TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ID, PAL_Timer_StopChannel(bad, ic));
     }
     assert_capture(id, ic, 3);
     assert_counter(id, 3);
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, update, &updates));
+    OK(PAL_Timer_Start(id, false, update, &updates));
     advance(16);
     TEST_ASSERT_EQUAL_UINT(2, matches);
     TEST_ASSERT_EQUAL_UINT(2, updates);
@@ -314,32 +320,33 @@ static void test_id_bounds(void)
 static void test_status(void)
 {
     uint32_t value = 42;
-    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_Start(id, false, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_Stop(id));
-    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_StartChannel(id, ic, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_SetChannelCallback(id, ic, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_StartChannel(id, ic));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_NOT_INITIALIZED, PAL_Timer_StopChannel(id, ic));
     OK(PAL_Timer_Init(id));
     OK(PAL_Timer_SetAutoReload(id, 5, PAL_TIMER_IMMEDIATE));
     OK(PAL_Timer_ConfigureChannel(id, ic, (PalTimerChannelConfig){
         .mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = PAL_TIMER_CAPTURE_RISING
     }));
-    OK(PAL_Timer_StartChannel(id, ic, capture, &value));
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &value));
+    OK(PAL_Timer_StartChannel(id, ic));
     OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_GetCapture(id, ic, NULL));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_GetCapture(id, (PalTimerChannel)-1, &value));
     TEST_ASSERT_EQUAL_UINT32(42, value);
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_StopChannel(id, (PalTimerChannel)-1));
-    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_StartChannel(id, (PalTimerChannel)4, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_SetChannelCallback(id, (PalTimerChannel)4, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_StartChannel(id, (PalTimerChannel)4));
     OK(PAL_Timer_Host_DispatchCaptures(id));
     TEST_ASSERT_EQUAL_UINT32(0, value);
 
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_GetCounter(id, NULL));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_SetCompare(id, (PalTimerChannel)4, 100));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT, PAL_Timer_SetAutoReload(id, 1, (PalTimerApply)2));
-    OK(PAL_Timer_Start(id, PAL_TIMER_KEEP_COUNTER, update, &updates));
+    OK(PAL_Timer_Start(id, false, update, &updates));
     advance(2);
-    TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT,
-                          PAL_Timer_Start(id, (PalTimerStartCount)2, NULL, NULL));
     assert_counter(id, 2);
     advance(4);
     TEST_ASSERT_EQUAL_UINT(1, updates);
@@ -371,9 +378,11 @@ static void test_channel_mapping(void)
     OK(PAL_Timer_ConfigureChannel(id, PAL_TIMER_CHANNEL_1, compare));
     compare.compare_value = 7;
     OK(PAL_Timer_ConfigureChannel(id, PAL_TIMER_CHANNEL_4, compare));
-    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_1, first_match, &first));
-    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_4, last_match, &last));
-    OK(PAL_Timer_Start(id, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_SetChannelCallback(id, PAL_TIMER_CHANNEL_1, first_match, &first));
+    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_1));
+    OK(PAL_Timer_SetChannelCallback(id, PAL_TIMER_CHANNEL_4, last_match, &last));
+    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_4));
+    OK(PAL_Timer_Start(id, true, NULL, NULL));
     advance(2);
     TEST_ASSERT_EQUAL_UINT(1, first);
     TEST_ASSERT_EQUAL_UINT(0, last);
@@ -385,8 +394,8 @@ static void test_channel_mapping(void)
                                            .capture_edge = PAL_TIMER_CAPTURE_RISING};
     OK(PAL_Timer_ConfigureChannel(id, PAL_TIMER_CHANNEL_1, capture_config));
     OK(PAL_Timer_ConfigureChannel(id, PAL_TIMER_CHANNEL_4, capture_config));
-    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_1, NULL, NULL));
-    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_4, NULL, NULL));
+    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_1));
+    OK(PAL_Timer_StartChannel(id, PAL_TIMER_CHANNEL_4));
     OK(PAL_Timer_Host_LatchEdge(id, PAL_TIMER_CHANNEL_4, PAL_TIMER_CAPTURE_RISING));
     advance(1);
     OK(PAL_Timer_Host_LatchEdge(id, PAL_TIMER_CHANNEL_1, PAL_TIMER_CAPTURE_RISING));
@@ -409,13 +418,56 @@ static void test_master_trigger(void)
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_INVALID_ARGUMENT,
                           PAL_Timer_ConfigureMasterTrigger(master, (PalTimerMasterTriggerOutput)4));
     OK(PAL_Timer_ConfigureSlave(master, PAL_TIMER_TRIGGER_START, PAL_TIMER_ITR3));
-    OK(PAL_Timer_Start(master, PAL_TIMER_CLEAR_COUNTER, NULL, NULL));
+    OK(PAL_Timer_Start(master, true, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_BUSY, PAL_Timer_ConfigureMasterTrigger(master, PAL_TIMER_TRGO_ENABLE));
     PAL_Timer_Host_Trigger(master, PAL_TIMER_ITR3);
     OK(PAL_Timer_Host_Advance(master, 2));
     assert_counter(master, 2);
     TEST_ASSERT_EQUAL_INT(PAL_TIMER_STATUS_BUSY, PAL_Timer_ConfigureMasterTrigger(master, PAL_TIMER_TRGO_UPDATE));
     TEST_ASSERT_EQUAL_UINT(PAL_TIMER_TRGO_COMPARE_PULSE, PAL_Timer_Host_MasterTrigger(master));
+}
+
+static void test_callback_swap(void)
+{
+    uint32_t first = UINT32_MAX, second = UINT32_MAX;
+    OK(PAL_Timer_Init(id));
+    OK(PAL_Timer_ConfigureChannel(id, ic, (PalTimerChannelConfig){
+        .mode = PAL_TIMER_CHANNEL_MODE_INPUT_CAPTURE, .capture_edge = PAL_TIMER_CAPTURE_RISING
+    }));
+    OK(PAL_Timer_ConfigureChannel(id, oc, (PalTimerChannelConfig){
+        .mode = PAL_TIMER_CHANNEL_MODE_OUTPUT_COMPARE, .compare_value = 2
+    }));
+    OK(PAL_Timer_SetChannelCallback(id, oc, match, &matches));
+    OK(PAL_Timer_StartChannel(id, oc));
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &first));
+    OK(PAL_Timer_StartChannel(id, ic));
+    OK(PAL_Timer_Start(id, false, NULL, NULL));
+    advance(1);
+    OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &second));
+    OK(PAL_Timer_Host_DispatchCaptures(id));
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, first);
+    TEST_ASSERT_EQUAL_UINT32(1, second);
+    OK(PAL_Timer_SetChannelCallback(id, ic, NULL, NULL));
+    advance(1);
+    TEST_ASSERT_EQUAL_UINT(1, matches);
+    OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
+    OK(PAL_Timer_Host_DispatchCaptures(id));
+    TEST_ASSERT_EQUAL_UINT32(1, second);
+    OK(PAL_Timer_SetChannelCallback(id, ic, capture, &first));
+    OK(PAL_Timer_Host_DispatchCaptures(id));
+    TEST_ASSERT_EQUAL_UINT32(2, first);
+
+    OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
+    OK(PAL_Timer_SetChannelCallback(id, ic, match, &updates));
+    OK(PAL_Timer_Host_DispatchCaptures(id));
+    TEST_ASSERT_EQUAL_UINT(1, updates);
+    OK(PAL_Timer_StopChannel(id, ic));
+    OK(PAL_Timer_StartChannel(id, ic));
+    OK(PAL_Timer_Host_LatchEdge(id, ic, PAL_TIMER_CAPTURE_RISING));
+    OK(PAL_Timer_Host_DispatchCaptures(id));
+    TEST_ASSERT_EQUAL_UINT(2, updates);
+    assert_counter(id, 2);
 }
 
 int main(int argc, char **argv)
@@ -431,6 +483,7 @@ int main(int argc, char **argv)
         TEST_CASE(test_id_bounds),
         TEST_CASE(test_status),
         TEST_CASE(test_channel_mapping),
+        TEST_CASE(test_callback_swap),
     };
     return run_test_cases(argc, argv, __FILE__, cases, sizeof cases / sizeof cases[0]);
 }

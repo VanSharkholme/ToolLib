@@ -351,6 +351,16 @@ PalTimerStatus PAL_Timer_Port_SetCompare(PalTimerId id, PalTimerChannel channel,
     return PAL_TIMER_STATUS_OK;
 }
 
+void PAL_Timer_Port_SetChannelInterrupt(void* context, PalTimerChannel channel, bool notify)
+{
+    const Stm32Timer* device = context;
+    uint32_t interrupt = channel_flag(channel); /* CCxIE and CCxIF have the same bit index. */
+    if (notify)
+        __HAL_TIM_ENABLE_IT(device->htim, interrupt);
+    else
+        __HAL_TIM_DISABLE_IT(device->htim, interrupt);
+}
+
 void PAL_Timer_Port_EnableChannel(void* context, PalTimerChannel channel, bool enable, bool notify)
 {
     const Stm32Timer* device = context;
